@@ -1,10 +1,18 @@
+<p align="center"><img src="assets/logo.png" width="160" alt="JeanNotch logo: a pixel J hanging from a notch"></p>
+
 # JeanNotch
+
+[![CI](https://github.com/NeilujD/jean-notch/actions/workflows/ci.yml/badge.svg)](https://github.com/NeilujD/jean-notch/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+> **Unofficial.** JeanNotch is a community companion app. It is not affiliated with or endorsed
+> by coollabsio or the Jean project.
 
 A small macOS app that sits around the MacBook notch and shows the status of every
 running [Jean](https://github.com/coollabsio/jean) session. It is separate from Jean: it only reads
 Jean's built-in WebSocket server.
 
-- **Collapsed:** a black shape that blends with the notch. Left: a spinner and the number of
+- **Collapsed:** a black shape that blends with the notch. Left: the mascot and the number of
   running sessions. Right: a dot for the most urgent state (orange = waiting for you,
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
@@ -14,6 +22,21 @@ Jean's built-in WebSocket server.
   its row or bring Jean to the front.
 - **Click a row:** brings Jean to the front and asks it to select that session.
 - **Gear or right-click:** Mute Sounds, Launch at Login, Quit.
+
+### The mascot
+
+A pixel "J" lives next to the notch and acts out the most urgent state:
+
+| State | What it does |
+|---|---|
+| Running | Hops along, leaning forward |
+| Waiting for you | Taps its foot, with a "?" |
+| Done | Jumps for joy, with a "!" (plus a confetti burst when the session finishes) |
+| Failed | Falls over with X eyes |
+| Jean offline | Sleeps ("z") |
+
+The notch opens and closes with a spring. With **Reduce Motion** on (System Settings ›
+Accessibility › Display), the mascot stays still, confetti is off, and the notch only fades.
 
 ## Requirements
 
@@ -37,6 +60,12 @@ open build/JeanNotch.app
 log stream --level debug --predicate 'subsystem == "build.jean.notch"'
 ```
 
+## Logo
+
+`assets/logo.svg`, `assets/logo.png` and `assets/AppIcon.icns` come from one pixel grid in
+`scripts/make-logo.swift`. Edit the grid, then run `swift scripts/make-logo.swift`.
+The pixel "J" and its palette are a nod to Jean's logo.
+
 ## How it connects
 
 1. At each connection attempt it reads `~/Library/Application Support/com.jean.desktop/preferences.json`
@@ -58,4 +87,7 @@ log stream --level debug --predicate 'subsystem == "build.jean.notch"'
 - A session waiting on a Claude question or plan is detected from the `AskUserQuestion` /
   `ExitPlanMode` tool event or from the snapshot's `waiting_for_input`.
 - The status list shows at most 12 sessions ("+N more" for the rest).
-- No animations in v1; the panel resizes instantly.
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Julien Collard. See [NOTICE](NOTICE).

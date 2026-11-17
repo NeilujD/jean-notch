@@ -27,6 +27,7 @@ struct NotchGeometry: Equatable {
 /// It never becomes key or main, so the frontmost app keeps focus.
 final class NotchPanel: NSPanel {
     private var screenFrame = NSRect.zero
+    private var shrinkTask: Task<Void, Never>?
 
     init<Content: View>(rootView: Content, onHover: @escaping (Bool) -> Void, onRightClick: @escaping (NSEvent, NSView) -> Void) {
         super.init(
@@ -60,11 +61,26 @@ final class NotchPanel: NSPanel {
 
     func place(on screen: NSScreen) {
         screenFrame = screen.frame
-        resize(to: frame.size)
+        apply(frame.size)
     }
 
     /// Keeps the panel top-centered on its screen at the SwiftUI content size.
+    /// Grows at once and shrinks after the collapse animation, so the window
+    /// never clips the animating shape. Its transparent part passes clicks through.
     func resize(to size: CGSize) {
+        shrinkTask?.cancel()
+        if size.width < frame.width || size.height < frame.height {
+            shrinkTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled else { return }
+                self?.apply(size)
+            }
+        } else {
+            apply(size)
+        }
+    }
+
+    private func apply(_ size: CGSize) {
         guard size.width > 0, size.height > 0, screenFrame != .zero else { return }
         let origin = NSPoint(x: (screenFrame.midX - size.width / 2).rounded(), y: screenFrame.maxY - size.height)
         setFrame(NSRect(origin: origin, size: size), display: true)

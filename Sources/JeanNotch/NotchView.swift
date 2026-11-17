@@ -11,8 +11,9 @@ struct NotchView: View {
     let store: SessionStore
     let panel: PanelState
     let actions: NotchActions
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let side: CGFloat = 34
+    private let side: CGFloat = 44
     private let expandedWidth: CGFloat = 380
     private let maxRows = 12
 
@@ -29,12 +30,29 @@ struct NotchView: View {
             if panel.expanded {
                 header
                 list.padding(.horizontal, 14).padding(.bottom, 12)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             } else {
-                collapsed
+                collapsed.transition(.opacity)
             }
         }
         .frame(width: width)
         .background(NotchShape(radius: panel.expanded ? 18 : 8).fill(.black))
+        .overlay {
+            if let start = panel.celebration, panel.expanded, !reduceMotion {
+                ConfettiView(start: start)
+            }
+        }
+        .clipShape(NotchShape(radius: panel.expanded ? 18 : 8))
+        .animation(morph, value: panel.expanded)
+        .animation(morph, value: width)
+    }
+
+    private var morph: Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.38, dampingFraction: 0.8)
+    }
+
+    private var mood: MascotMood {
+        MascotMood(connection: store.connection, board: store.board)
     }
 
     private var width: CGFloat {
@@ -60,13 +78,17 @@ struct NotchView: View {
     }
 
     @ViewBuilder private var runningIndicator: some View {
-        let count = store.board.runningCount
-        if count > 0 {
+        if hasIndicators {
             HStack(spacing: 3) {
-                ProgressView().controlSize(.mini)
-                Text("\(count)").font(.system(size: 10, weight: .semibold).monospacedDigit())
+                MascotView(mood: mood)
+                let count = store.board.runningCount
+                if count > 0 {
+                    Text("\(count)").font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .contentTransition(.numericText())
+                        .animation(morph, value: count)
+                }
             }
-            .foregroundStyle(.white)
         }
     }
 
@@ -81,7 +103,8 @@ struct NotchView: View {
     // MARK: Expanded
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
+            MascotView(mood: mood, pixel: 2)
             Text(statusLine).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             Spacer()
             Button(action: actions.showMenu) {

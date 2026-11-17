@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func alert(_ session: SessionState) {
         panelState.alert()
+        if session.status == .done { panelState.celebrate() }
         guard !muted else { return }
         let sound = switch session.status {
         case .failed: "Funk"
