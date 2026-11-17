@@ -54,6 +54,18 @@ scripts/bundle.sh      # release build → build/JeanNotch.app (ad-hoc signed)
 open build/JeanNotch.app
 ```
 
+If `swift test` fails with `plugin for module 'TestingMacros' not found` or
+`no such module 'Testing'`, your Command Line Tools do not give Swift Testing to SwiftPM
+(seen with Swift 6.4.2). Then run:
+
+```sh
+CLT=/Library/Developer/CommandLineTools
+swift test --build-system native \
+  -Xswiftc -F$CLT/Library/Developer/Frameworks \
+  -Xswiftc -plugin-path -Xswiftc $CLT/usr/lib/swift/host/plugins/testing \
+  -Xlinker -rpath -Xlinker $CLT/Library/Developer/Frameworks
+```
+
 "Launch at Login" works only from the bundled app. Logs:
 
 ```sh
