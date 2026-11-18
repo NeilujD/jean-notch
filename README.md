@@ -13,11 +13,11 @@ running [Jean](https://github.com/coollabsio/jean) session. It is separate from 
 Jean's built-in WebSocket server.
 
 <p align="center">
-  <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the mascot and 2 running sessions"><br>
+  <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the thin J and the number of running sessions"><br>
   <img src="assets/notch-expanded.png" width="400" alt="Expanded notch: Jean on the left of the notch, the running count on the right, and sessions grouped by project and worktree (one row blurred)">
 </p>
 
-- **Collapsed:** a black shape that blends with the notch. Left: the mascot and the number of
+- **Collapsed:** a black shape that blends with the notch. Left: the J and the number of
   running sessions. Right: a dot for the most urgent state (orange = waiting for you,
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
