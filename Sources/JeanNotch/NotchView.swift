@@ -14,7 +14,7 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let side: CGFloat = 44
-    private let expandedWidth: CGFloat = 380
+    private let expandedWidth: CGFloat = 400
     private let maxRows = 12
 
     var body: some View {
@@ -102,27 +102,36 @@ struct NotchView: View {
 
     // MARK: Expanded
 
+    /// One slot each side of the hardware notch, so no text sits under it.
     private var header: some View {
-        HStack(spacing: 6) {
-            MascotView(mood: mood, pixel: 2, lively: true)
-            Text(statusLine).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-            Spacer()
-            Button(action: actions.showMenu) {
-                Image(systemName: "gearshape.fill").font(.system(size: 11))
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                MascotView(mood: mood, pixel: 2, lively: true)
+                Text("Jean")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear.frame(width: panel.geometry.width + 12)
+            HStack(spacing: 6) {
+                Text(statusLine).lineLimit(1)
+                Button(action: actions.showMenu) {
+                    Image(systemName: "gearshape.fill").font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
         .frame(height: max(panel.geometry.height, 28))
     }
 
     private var statusLine: String {
         switch store.connection {
-        case .connecting: "Connecting to Jean…"
-        case .offline: "Jean offline"
+        case .connecting: "Connecting"
+        case .offline: "Offline"
         case .online:
-            store.board.runningCount == 0 ? "Jean" : "Jean · \(store.board.runningCount) running"
+            store.board.runningCount == 0 ? "" : "\(store.board.runningCount) running"
         }
     }
 
