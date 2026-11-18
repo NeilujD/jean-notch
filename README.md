@@ -22,7 +22,7 @@ Jean's built-in WebSocket server.
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
   project › worktree, sorted waiting → failed → running → done. Idle and seen sessions are hidden.
-- **Tokens:** each row shows the session's total tokens, for example "3.2M tokens"
+- **Tokens:** each row shows the session's total tokens, for example "3.2M"
   (k = thousand, M = million). The total counts input, output, and cache reads and
   writes, summed over all runs. Jean saves a run's usage when the run ends, so the count
   moves when a run finishes. Over the limit, the count turns orange with a ⚠ icon. The
@@ -32,7 +32,14 @@ Jean's built-in WebSocket server.
   soft system sound (mute it in the menu). A finished session stays "unseen" until you click
   its row or bring Jean to the front.
 - **Click a row:** brings Jean to the front and asks it to select that session.
-- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Quit.
+- **Plan usage:** the bottom of the expanded panel shows how much of each plan limit you
+  used, for Claude, Codex and Grok, and the time until it resets
+  (for example "Claude  5h 1% · 4h55  week 29% · 5d"). A provider you are not logged in to
+  is not shown. Jean caches these values for 5 minutes, so they can lag a little. When any
+  limit is over 80%, the collapsed notch shows an orange ⚠. Change the limit in the menu
+  (**Usage Warning**) or with `defaults write build.jean.notch usageWarning -int 90`
+  (0 turns it off). Jean's other agents (OpenCode, Cursor, Pi, and so on) give no usage data.
+- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning, Quit.
 
 ### The mascot
 

@@ -17,6 +17,8 @@ public final class SessionStore {
     public private(set) var connection = ConnectionState.connecting
     /// Token usage of the sessions the notch shows, by session id.
     public private(set) var tokens: [String: TokenUsage] = [:]
+    /// Plan limits of the providers that answered (a provider you are not logged in to errors).
+    public private(set) var usage: [UsageProvider: ProviderUsage] = [:]
     /// Called when a session moves into waiting, done, or failed.
     @ObservationIgnored public var onAlert: ((SessionState) -> Void)?
 
@@ -24,6 +26,7 @@ public final class SessionStore {
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var usageTask: Task<Void, Never>?
 
     public init(client: JeanClient = JeanClient()) {
         self.client = client
@@ -44,8 +47,10 @@ public final class SessionStore {
         case .connected:
             connection = .online
             scheduleRefresh(after: .zero)
+            scheduleUsageRefresh(after: .zero)
         case .disconnected(let reason):
             connection = .offline(reason)
+            usageTask?.cancel()
         case .event(let jeanEvent):
             let result = board.apply(jeanEvent, now: Date())
             storeLog.debug("Event \(String(describing: jeanEvent), privacy: .public)")
@@ -59,6 +64,7 @@ public final class SessionStore {
             switch jeanEvent {
             case .done(let ref, _), .failed(let ref), .cancelled(let ref):
                 loadTokens(ref.sessionId)
+                scheduleUsageRefresh(after: .seconds(2))
             case .sending(let ref) where tokens[ref.sessionId] == nil:
                 loadTokens(ref.sessionId)
             default:
@@ -112,6 +118,27 @@ public final class SessionStore {
             } catch {
                 storeLog.error("get_session_debug_info failed: \(String(describing: error), privacy: .public)")
             }
+        }
+    }
+
+    /// Refreshes every provider, then again every 5 minutes. Each call replaces the pending one.
+    private func scheduleUsageRefresh(after delay: Duration) {
+        usageTask?.cancel()
+        usageTask = Task { [weak self, client] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            var next: [UsageProvider: ProviderUsage] = [:]
+            for provider in UsageProvider.allCases {
+                do {
+                    let raw = try await client.invoke(provider.command)
+                    next[provider] = try ServerMessage.decodeData(ProviderUsage.self, from: raw)
+                } catch {
+                    storeLog.debug("\(provider.command, privacy: .public): \(String(describing: error), privacy: .public)")
+                }
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.usage = next
+            self.scheduleUsageRefresh(after: .seconds(300))
         }
     }
 

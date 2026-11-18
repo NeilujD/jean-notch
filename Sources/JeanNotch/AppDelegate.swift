@@ -8,12 +8,32 @@ private let appLog = Logger(subsystem: "build.jean.notch", category: "app")
 private let jeanBundleId = "com.jean.desktop"
 private let mutedKey = "muted"
 
-/// Rows show an orange warning when a session's token total passes this limit. 0 turns it off.
+/// A limit that turns something orange once passed, stored in UserDefaults. 0 turns it off.
 /// Any value works: `defaults write build.jean.notch tokenWarning -int 3000000`.
-enum TokenWarning {
-    static let key = "tokenWarning"
-    static let defaultLimit = 10_000_000
-    static let presets = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000]
+struct WarningLimit: Sendable {
+    let key: String
+    let defaultValue: Int
+    let presets: [Int]
+    let title: String
+    /// "10 million tokens", "80% used".
+    let label: @Sendable (Int) -> String
+
+    /// A session row's token total.
+    static let tokens = WarningLimit(
+        key: "tokenWarning", defaultValue: 10_000_000,
+        presets: [1_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000],
+        title: "Token Warning",
+        label: { value in
+            let amount = value % 1_000_000 == 0 ? "\(value / 1_000_000) million" : value.formatted()
+            return "\(amount) tokens"
+        }
+    )
+
+    /// The tightest plan limit of any provider, in percent.
+    static let usage = WarningLimit(
+        key: "usageWarning", defaultValue: 80, presets: [50, 70, 80, 90, 95],
+        title: "Usage Warning", label: { "\($0)% used" }
+    )
 }
 
 @MainActor
@@ -23,7 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NotchPanel!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [TokenWarning.key: TokenWarning.defaultLimit])
+        UserDefaults.standard.register(defaults: Dictionary(uniqueKeysWithValues:
+            [WarningLimit.tokens, .usage].map { ($0.key, $0.defaultValue) }))
         let actions = NotchActions(
             open: { [weak self] in self?.open($0) },
             showMenu: { [weak self] in self?.showMenu(event: nil, in: nil) },
@@ -107,9 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         let quit = NSMenuItem(title: "Quit JeanNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         for item in [mute, login] { item.target = self }
-        let tokens = NSMenuItem(title: "Token Warning", action: nil, keyEquivalent: "")
-        tokens.submenu = tokenWarningMenu()
-        menu.items = [mute, login, tokens, .separator(), quit]
+        let limits = [WarningLimit.tokens, .usage].map { limit in
+            let item = NSMenuItem(title: limit.title, action: nil, keyEquivalent: "")
+            item.submenu = warningMenu(limit)
+            return item
+        }
+        menu.items = [mute, login] + limits + [.separator(), quit]
 
         if let event, let view {
             NSMenu.popUpContextMenu(menu, with: event, for: view)
@@ -120,32 +144,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelState.setHovering(panel.containsMouse)
     }
 
-    private func tokenWarningMenu() -> NSMenu {
-        let current = UserDefaults.standard.integer(forKey: TokenWarning.key)
+    private func warningMenu(_ limit: WarningLimit) -> NSMenu {
+        let current = UserDefaults.standard.integer(forKey: limit.key)
         let menu = NSMenu()
-        for limit in [0] + TokenWarning.presets {
-            let title = limit == 0 ? "Off" : "Over \(Self.words(limit)) tokens"
-            let item = NSMenuItem(title: title, action: #selector(setTokenWarning(_:)), keyEquivalent: "")
-            item.tag = limit
+        for value in [0] + limit.presets {
+            let item = NSMenuItem(
+                title: value == 0 ? "Off" : "Over \(limit.label(value))",
+                action: #selector(setWarning(_:)), keyEquivalent: ""
+            )
+            item.tag = value
+            item.representedObject = limit.key
             item.target = self
-            item.state = limit == current ? .on : .off
+            item.state = value == current ? .on : .off
             menu.addItem(item)
         }
-        if current > 0, !TokenWarning.presets.contains(current) {
-            let custom = NSMenuItem(title: "Over \(Self.words(current)) tokens (custom)", action: nil, keyEquivalent: "")
+        if current > 0, !limit.presets.contains(current) {
+            let custom = NSMenuItem(title: "Over \(limit.label(current)) (custom)", action: nil, keyEquivalent: "")
             custom.state = .on
             menu.addItem(custom)
         }
         return menu
     }
 
-    /// "10 million", or "3,500,000" when the value is not whole millions.
-    private static func words(_ tokens: Int) -> String {
-        tokens % 1_000_000 == 0 ? "\(tokens / 1_000_000) million" : tokens.formatted()
-    }
-
-    @objc private func setTokenWarning(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.tag, forKey: TokenWarning.key)
+    @objc private func setWarning(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(sender.tag, forKey: key)
     }
 
     @objc private func toggleMute() {

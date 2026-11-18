@@ -93,3 +93,30 @@ private let ref = SessionRef(sessionId: "s1", worktreeId: "w1")
     #expect(TokenUsage.format(3_230_171) == "3.2M")
     #expect(TokenUsage.format(42_090_055) == "42M")
 }
+
+private func usage(_ json: String) throws -> ProviderUsage {
+    try ServerMessage.decodeData(ProviderUsage.self, from: Data(#"{"type":"response","id":"1","data":\#(json)}"#.utf8))
+}
+
+@Test func decodesClaudeUsageWithFiveHourSession() throws {
+    let claude = try usage(#"{"planType":"team","planTier":null,"session":{"usedPercent":1.0,"resetsAt":1795017600},"weekly":{"usedPercent":29.0,"resetsAt":1795485600},"sonnetWeekly":null,"extraUsageSpent":0,"extraUsageLimit":0,"fetchedAt":1794999902}"#)
+    #expect(claude.limits(for: .claude) == [
+        .init(label: "5h", window: UsageWindow(usedPercent: 1, resetsAt: 1_795_017_600)),
+        .init(label: "week", window: UsageWindow(usedPercent: 29, resetsAt: 1_795_485_600)),
+    ])
+    #expect(claude.peakPercent == 29)
+}
+
+@Test func decodesCodexUsageAndLabelsWindowsByLength() throws {
+    let codex = try usage(#"{"planType":"plus","session":{"usedPercent":91.5,"resetsAt":1,"limitWindowSeconds":18000},"weekly":{"usedPercent":40,"resetsAt":2,"limitWindowSeconds":604800},"reviews":null,"creditsRemaining":null,"rateLimitReachedType":null,"modelLimits":[],"fetchedAt":0}"#)
+    #expect(codex.limits(for: .codex).map(\.label) == ["5h", "week"])
+    #expect(codex.peakPercent == 91.5)
+}
+
+@Test func formatsTimeUntilReset() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    #expect(ProviderUsage.timeLeft(until: 1_000_000 + 42 * 60, now: now) == "42m")
+    #expect(ProviderUsage.timeLeft(until: 1_000_000 + 4 * 3600 + 55 * 60, now: now) == "4h55")
+    #expect(ProviderUsage.timeLeft(until: 1_000_000 + 5 * 86_400 + 100, now: now) == "5d")
+    #expect(ProviderUsage.timeLeft(until: 999_000, now: now) == "0m")
+}

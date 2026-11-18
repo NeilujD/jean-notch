@@ -12,7 +12,8 @@ struct NotchView: View {
     let panel: PanelState
     let actions: NotchActions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(TokenWarning.key) private var tokenWarning = TokenWarning.defaultLimit
+    @AppStorage(WarningLimit.tokens.key) private var tokenWarning = WarningLimit.tokens.defaultValue
+    @AppStorage(WarningLimit.usage.key) private var usageWarning = WarningLimit.usage.defaultValue
 
     private let side: CGFloat = 44
     private let expandedWidth: CGFloat = 400
@@ -30,8 +31,14 @@ struct NotchView: View {
         VStack(spacing: 0) {
             if panel.expanded {
                 header
-                list.padding(.horizontal, 14).padding(.bottom, 12)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                VStack(spacing: 10) {
+                    list
+                    if store.connection == .online, !store.usage.isEmpty {
+                        UsageFooter(usage: store.usage, warning: usageWarning)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.bottom, 12)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             } else {
                 collapsed.transition(.opacity)
             }
@@ -64,7 +71,11 @@ struct NotchView: View {
     }
 
     private var hasIndicators: Bool {
-        store.board.runningCount > 0 || store.board.mostUrgent != nil || store.connection != .online
+        store.board.runningCount > 0 || store.board.mostUrgent != nil || store.connection != .online || usageOver
+    }
+
+    private var usageOver: Bool {
+        usageWarning > 0 && store.usage.values.contains { $0.peakPercent > Double(usageWarning) }
     }
 
     // MARK: Collapsed
@@ -96,8 +107,17 @@ struct NotchView: View {
     @ViewBuilder private var urgencyIndicator: some View {
         if store.connection != .online {
             Image(systemName: "bolt.slash.fill").font(.system(size: 9)).foregroundStyle(.gray)
-        } else if let urgency = store.board.mostUrgent {
-            Circle().fill(urgency.color).frame(width: 7, height: 7)
+        } else {
+            HStack(spacing: 4) {
+                if usageOver {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 8))
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("A provider is over the usage warning limit")
+                }
+                if let urgency = store.board.mostUrgent {
+                    Circle().fill(urgency.color).frame(width: 7, height: 7)
+                }
+            }
         }
     }
 
@@ -231,6 +251,56 @@ private struct SessionRow: View {
     }
 }
 
+/// One line per provider: each plan window's percent used and the time until it resets.
+private struct UsageFooter: View {
+    let usage: [UsageProvider: ProviderUsage]
+    let warning: Int
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 3) {
+                Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5)
+                ForEach(UsageProvider.allCases.filter { usage[$0] != nil }, id: \.self) { provider in
+                    HStack(spacing: 10) {
+                        Text(provider.name).font(.system(size: 10, weight: .medium))
+                            .frame(width: 40, alignment: .leading)
+                        ForEach(usage[provider]?.limits(for: provider) ?? [], id: \.label) { limit in
+                            LimitLabel(limit: limit, warning: warning, now: context.date)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+        }
+    }
+}
+
+private struct LimitLabel: View {
+    let limit: ProviderUsage.Limit
+    let warning: Int
+    let now: Date
+
+    private var over: Bool { warning > 0 && limit.window.usedPercent > Double(warning) }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if over {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 8))
+            }
+            Text("\(limit.label) \(Int(limit.window.usedPercent.rounded()))%")
+            if let resetsAt = limit.window.resetsAt {
+                Text("· \(ProviderUsage.timeLeft(until: resetsAt, now: now))").opacity(0.7)
+            }
+        }
+        .font(.system(size: 10).monospacedDigit())
+        .foregroundStyle(over ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+    }
+}
+
 private struct TokenCount: View {
     let total: UInt64
     let limit: Int
@@ -242,7 +312,7 @@ private struct TokenCount: View {
             if over {
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 8))
             }
-            Text("\(TokenUsage.format(total)) tokens").font(.system(size: 10).monospacedDigit())
+            Text(TokenUsage.format(total)).font(.system(size: 10).monospacedDigit())
         }
         .foregroundStyle(over ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
         .accessibilityElement(children: .ignore)
