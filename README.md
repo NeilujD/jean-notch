@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.png" width="160" alt="JeanNotch logo: a pixel J hanging from a notch"></p>
+<p align="center"><img src="assets/logo.png" width="160" alt="JeanNotch logo: a thin pixel J hanging from a notch"></p>
 
 # JeanNotch
 

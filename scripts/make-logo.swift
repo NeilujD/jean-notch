@@ -4,7 +4,7 @@
 import AppKit
 
 // 32 x 32 cells of 32 px on a 1024 px canvas.
-// N = notch, Y = J body, E = eye. Shadow cells are derived from Y and E.
+// N = notch, Y = J: a thin, flat J with two-cell strokes, like the one in the notch.
 let grid = [
     "................................",
     "................................",
@@ -14,21 +14,21 @@ let grid = [
     "..........NNNNNNNNNNNN..........",
     "..........NNNNNNNNNNNN..........",
     "...........NNNNNNNNNN...........",
-    ".................YYYYY..........",
-    ".................YYYYY..........",
-    ".................YYYYY..........",
-    ".................YEYEY..........",
-    ".................YEYEY..........",
-    ".................YYYYY..........",
-    ".................YYYYY..........",
-    ".................YYYYY..........",
-    ".................YYYYY..........",
-    ".........YYY.....YYYYY..........",
-    ".........YYY.....YYYYY..........",
-    ".........YYY.....YYYYY..........",
-    ".........YYY.....YYYYY..........",
-    "............YYYYYYYYY...........",
-    "............YYYYYYYYY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...................YY...........",
+    "...........YY......YY...........",
+    "...........YY......YY...........",
+    "...........YY......YY...........",
+    ".............YYYYYY.............",
+    ".............YYYYYY.............",
     "................................",
     "................................",
     "................................",
@@ -45,21 +45,11 @@ let size = 1024
 let colors: [Character: String] = [
     "N": "#000000",  // notch
     "Y": "#FDD24F",  // Jean yellow
-    "S": "#7A6431",  // Jean shadow brown
-    "E": "#2B2414",  // eyes
 ]
 let background = "#1E1E22"
 let bgInset = 96, bgRadius = 184
 
-var cells = grid.map { Array($0) }
-// Drop shadow one cell down-right of the J, under the notch.
-let body = cells
-for y in body.indices {
-    for x in body[y].indices where "YE".contains(body[y][x]) {
-        let sx = x + 1, sy = y + 1
-        if sy < cells.count, sx < cells[sy].count, cells[sy][sx] == "." { cells[sy][sx] = "S" }
-    }
-}
+let cells = grid.map { Array($0) }
 
 // MARK: SVG
 
