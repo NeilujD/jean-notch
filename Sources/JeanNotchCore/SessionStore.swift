@@ -15,12 +15,15 @@ public enum ConnectionState: Equatable, Sendable {
 public final class SessionStore {
     public private(set) var board = SessionBoard()
     public private(set) var connection = ConnectionState.connecting
+    /// Token usage of the sessions the notch shows, by session id.
+    public private(set) var tokens: [String: TokenUsage] = [:]
     /// Called when a session moves into waiting, done, or failed.
     @ObservationIgnored public var onAlert: ((SessionState) -> Void)?
 
     @ObservationIgnored private let client: JeanClient
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
 
     public init(client: JeanClient = JeanClient()) {
         self.client = client
@@ -53,6 +56,14 @@ public final class SessionStore {
             if result.needsSnapshot {
                 scheduleRefresh(after: jeanEvent == .resync ? .zero : .milliseconds(500))
             }
+            switch jeanEvent {
+            case .done(let ref, _), .failed(let ref), .cancelled(let ref):
+                loadTokens(ref.sessionId)
+            case .sending(let ref) where tokens[ref.sessionId] == nil:
+                loadTokens(ref.sessionId)
+            default:
+                break
+            }
         }
     }
 
@@ -68,10 +79,38 @@ public final class SessionStore {
                 let snapshot = try ServerMessage.decodeData(AllSessionsResponse.self, from: raw)
                 guard let self else { return }
                 self.board.load(snapshot, requestedAt: requestedAt)
+                self.tokens = self.tokens.filter { self.board.sessions[$0.key] != nil }
+                self.tokenTasks = self.tokenTasks.filter { self.board.sessions[$0.key] != nil }
+                for group in self.board.visibleGroups {
+                    for session in group.sessions where self.tokens[session.id] == nil {
+                        self.loadTokens(session.id)
+                    }
+                }
                 let total = snapshot.entries.reduce(0) { $0 + $1.sessions.count }
                 storeLog.info("Snapshot: \(snapshot.entries.count) worktrees, \(total) sessions, \(self.board.visibleGroups.count) visible groups, \(self.board.runningCount) running")
             } catch {
                 storeLog.error("Snapshot failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Jean saves a run's usage before it sends `chat:done`, so a fetch then sees the new total.
+    private func loadTokens(_ sessionId: String) {
+        guard let session = board.sessions[sessionId], !session.worktreePath.isEmpty else { return }
+        tokenTasks[sessionId]?.cancel()
+        tokenTasks[sessionId] = Task { [weak self, client] in
+            do {
+                let raw = try await client.invoke("get_session_debug_info", args: [
+                    "worktreeId": session.worktreeId,
+                    "worktreePath": session.worktreePath,
+                    "sessionId": session.id,
+                ])
+                let info = try ServerMessage.decodeData(SessionDebugInfo.self, from: raw)
+                guard !Task.isCancelled else { return }
+                self?.tokens[sessionId] = info.totalUsage
+                storeLog.debug("Tokens \(sessionId, privacy: .public): \(info.totalUsage.total)")
+            } catch {
+                storeLog.error("get_session_debug_info failed: \(String(describing: error), privacy: .public)")
             }
         }
     }

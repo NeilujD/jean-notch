@@ -12,6 +12,7 @@ struct NotchView: View {
     let panel: PanelState
     let actions: NotchActions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(TokenWarning.key) private var tokenWarning = TokenWarning.defaultLimit
 
     private let side: CGFloat = 44
     private let expandedWidth: CGFloat = 400
@@ -163,7 +164,9 @@ struct NotchView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     ForEach(group.sessions) { session in
-                        SessionRow(session: session, now: now) { actions.open(session) }
+                        SessionRow(
+                            session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now
+                        ) { actions.open(session) }
                     }
                 }
             }
@@ -191,6 +194,8 @@ struct NotchView: View {
 
 private struct SessionRow: View {
     let session: SessionState
+    let tokens: TokenUsage?
+    let tokenLimit: Int
     let now: Date
     let action: () -> Void
 
@@ -200,6 +205,9 @@ private struct SessionRow: View {
                 StatusBadge(session: session)
                 Text(session.name).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                if let tokens, tokens.total > 0 {
+                    TokenCount(total: tokens.total, limit: tokenLimit)
+                }
                 Text(Self.age(from: session.changedAt, to: now))
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -220,6 +228,25 @@ private struct SessionRow: View {
         case ..<86400: return "\(seconds / 3600)h"
         default: return "\(seconds / 86400)d"
         }
+    }
+}
+
+private struct TokenCount: View {
+    let total: UInt64
+    let limit: Int
+
+    private var over: Bool { limit > 0 && total > UInt64(limit) }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if over {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 8))
+            }
+            Text("\(TokenUsage.format(total)) tokens").font(.system(size: 10).monospacedDigit())
+        }
+        .foregroundStyle(over ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(over ? "\(total) tokens, over the warning limit" : "\(total) tokens")
     }
 }
 

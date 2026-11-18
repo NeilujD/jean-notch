@@ -190,3 +190,42 @@ public struct AllSessionsResponse: Decodable, Equatable, Sendable {
         init(from decoder: Decoder) throws {}
     }
 }
+
+// MARK: - get_session_debug_info
+
+/// A session's token usage summed over all its runs (`SessionDebugInfo.total_usage`).
+/// Jean writes a run's usage when the run ends, so the count moves on `chat:done`.
+public struct TokenUsage: Decodable, Equatable, Sendable {
+    public let inputTokens: UInt64
+    public let outputTokens: UInt64
+    public let cacheReadInputTokens: UInt64
+    public let cacheCreationInputTokens: UInt64
+
+    public init(input: UInt64, output: UInt64, cacheRead: UInt64 = 0, cacheCreation: UInt64 = 0) {
+        inputTokens = input
+        outputTokens = output
+        cacheReadInputTokens = cacheRead
+        cacheCreationInputTokens = cacheCreation
+    }
+
+    /// Every token the model processed. Cache reads are most of it: each turn re-reads the context.
+    public var total: UInt64 {
+        inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens
+    }
+
+    /// "950", "12k", "3.2M", "42M".
+    public static func format(_ tokens: UInt64) -> String {
+        func short(_ value: Double, _ unit: String) -> String {
+            value < 10 ? String(format: "%.1f%@", (value * 10).rounded(.down) / 10, unit) : "\(Int(value))\(unit)"
+        }
+        switch tokens {
+        case ..<1_000: return "\(tokens)"
+        case ..<1_000_000: return short(Double(tokens) / 1_000, "k")
+        default: return short(Double(tokens) / 1_000_000, "M")
+        }
+    }
+}
+
+public struct SessionDebugInfo: Decodable, Equatable, Sendable {
+    public let totalUsage: TokenUsage
+}

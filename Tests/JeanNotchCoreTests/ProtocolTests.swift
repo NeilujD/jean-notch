@@ -78,3 +78,18 @@ private let ref = SessionRef(sessionId: "s1", worktreeId: "w1")
         try Preferences.parse(Data(#"{"http_server_bind_host":"192.168.1.5"}"#.utf8))
     }
 }
+
+@Test func decodesSessionTokenUsage() throws {
+    let raw = Data(#"{"type":"response","id":"1","data":{"app_data_dir":"/x","run_log_files":[],"total_usage":{"input_tokens":82,"output_tokens":22012,"cache_read_input_tokens":3109257,"cache_creation_input_tokens":98820}}}"#.utf8)
+    let info = try ServerMessage.decodeData(SessionDebugInfo.self, from: raw)
+    #expect(info.totalUsage == TokenUsage(input: 82, output: 22012, cacheRead: 3_109_257, cacheCreation: 98820))
+    #expect(info.totalUsage.total == 3_230_171)
+}
+
+@Test func formatsTokenCountsCompactly() {
+    #expect(TokenUsage.format(950) == "950")
+    #expect(TokenUsage.format(9_999) == "9.9k")
+    #expect(TokenUsage.format(12_400) == "12k")
+    #expect(TokenUsage.format(3_230_171) == "3.2M")
+    #expect(TokenUsage.format(42_090_055) == "42M")
+}

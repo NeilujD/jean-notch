@@ -22,11 +22,17 @@ Jean's built-in WebSocket server.
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
   project › worktree, sorted waiting → failed → running → done. Idle and seen sessions are hidden.
+- **Tokens:** each row shows the session's total tokens, for example "3.2M tokens"
+  (k = thousand, M = million). The total counts input, output, and cache reads and
+  writes, summed over all runs. Jean saves a run's usage when the run ends, so the count
+  moves when a run finishes. Over the limit, the count turns orange with a ⚠ icon. The
+  default limit is 10 million. Change it in the menu (**Token Warning**), or set any value with
+  `defaults write build.jean.notch tokenWarning -int 3000000` (0 turns it off).
 - **Alert:** when a session starts waiting, finishes, or fails, the notch expands and plays a
   soft system sound (mute it in the menu). A finished session stays "unseen" until you click
   its row or bring Jean to the front.
 - **Click a row:** brings Jean to the front and asks it to select that session.
-- **Gear or right-click:** Mute Sounds, Launch at Login, Quit.
+- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Quit.
 
 ### The mascot
 
