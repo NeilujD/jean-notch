@@ -13,8 +13,8 @@ running [Jean](https://github.com/coollabsio/jean) session. It is separate from 
 Jean's built-in WebSocket server.
 
 <p align="center">
-  <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the thin J and the number of running sessions"><br>
-  <img src="assets/notch-expanded.png" width="400" alt="Expanded notch: Jean on the left of the notch, the running count on the right, and sessions grouped by project and worktree (one row blurred)">
+  <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the thin J, one running session, and an orange dot for a session waiting for you"><br>
+  <img src="assets/notch-expanded.png" width="400" alt="Expanded notch: sessions grouped by project and worktree with their token counts, one over the warning limit in orange, and the Claude plan usage at the bottom (one project blurred)">
 </p>
 
 - **Collapsed:** a black shape that blends with the notch. Left: the J and the number of
