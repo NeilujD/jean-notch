@@ -14,7 +14,7 @@ Jean's built-in WebSocket server.
 
 <p align="center">
   <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the mascot and 2 running sessions"><br>
-  <img src="assets/notch-expanded.png" width="380" alt="Expanded notch: running sessions grouped by project and worktree (one row blurred)">
+  <img src="assets/notch-expanded.png" width="400" alt="Expanded notch: Jean on the left of the notch, the running count on the right, and sessions grouped by project and worktree (one row blurred)">
 </p>
 
 - **Collapsed:** a black shape that blends with the notch. Left: the mascot and the number of
