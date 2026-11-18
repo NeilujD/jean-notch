@@ -35,6 +35,9 @@ A pixel "J" lives next to the notch and acts out the most urgent state:
 | Failed | Falls over with X eyes |
 | Jean offline | Sleeps ("z") |
 
+While the notch is collapsed, the mascot holds a pose and fidgets for a few seconds every
+15 s. It animates all the time while the notch is open. This keeps JeanNotch under 1% CPU.
+
 The notch opens and closes with a spring. With **Reduce Motion** on (System Settings ›
 Accessibility › Display), the mascot stays still, confetti is off, and the notch only fades.
 

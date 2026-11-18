@@ -104,7 +104,7 @@ struct NotchView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            MascotView(mood: mood, pixel: 2)
+            MascotView(mood: mood, pixel: 2, lively: true)
             Text(statusLine).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             Spacer()
             Button(action: actions.showMenu) {

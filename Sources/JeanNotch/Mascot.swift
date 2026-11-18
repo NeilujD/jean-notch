@@ -21,6 +21,9 @@ enum MascotMood: Equatable {
 struct MascotView: View {
     let mood: MascotMood
     var pixel: CGFloat = 2.5
+    /// Animate continuously. Otherwise the mascot only fidgets in short bursts,
+    /// because every frame re-renders the whole notch (~3% CPU when continuous).
+    var lively = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Y = body, E = eye. The shadow is drawn one pixel down-right of the body.
@@ -42,9 +45,10 @@ struct MascotView: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 20, paused: reduceMotion)) { context in
-            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
-            let pose = Self.pose(for: mood, at: t)
+        let schedule = FidgetSchedule(continuous: lively)
+        TimelineView(schedule) { context in
+            let moving = !reduceMotion && schedule.isActive(at: context.date)
+            let pose = Self.pose(for: mood, at: moving ? context.date.timeIntervalSinceReferenceDate : Self.restTime)
             HStack(spacing: 1) {
                 sprite(eyes: pose.eyes)
                     .scaleEffect(x: 1 / pose.squash, y: pose.squash, anchor: .bottom)
@@ -115,6 +119,9 @@ struct MascotView: View {
         var markLift: CGFloat = 0
     }
 
+    /// A time at which every mood shows a calm, eyes-open frame.
+    static let restTime: TimeInterval = 1
+
     static func pose(for mood: MascotMood, at t: TimeInterval) -> Pose {
         var pose = Pose()
         // Blink for 0.12 s every 3.2 s.
@@ -162,5 +169,34 @@ struct MascotView: View {
             pose.markLift = (t.truncatingRemainder(dividingBy: 2)) * 2
         }
         return pose
+    }
+}
+
+/// 20 fps while active; no frames at all between fidget bursts.
+/// Bursts are aligned to wall-clock time: `burst` seconds every `period` seconds.
+struct FidgetSchedule: TimelineSchedule {
+    var continuous: Bool
+    var interval: TimeInterval = 1 / 20
+    var period: TimeInterval = 15
+    var burst: TimeInterval = 2.5
+
+    func isActive(at date: Date) -> Bool {
+        continuous || phase(of: date) < burst
+    }
+
+    private func phase(of date: Date) -> TimeInterval {
+        date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
+    }
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> UnfoldSequence<Date, (Date?, Bool)> {
+        sequence(first: startDate) { date in
+            if continuous { return date + interval }
+            let phase = phase(of: date)
+            if phase < burst {
+                // Next frame, or one last frame at the burst end to draw the rest pose.
+                return date + min(interval, burst - phase)
+            }
+            return date + (period - phase)
+        }
     }
 }
