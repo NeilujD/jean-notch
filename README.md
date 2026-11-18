@@ -30,21 +30,19 @@ Jean's built-in WebSocket server.
 
 ### The mascot
 
-A pixel "J" lives next to the notch and acts out the most urgent state:
+A flat pixel "J" sits next to the notch. It does not act out urgency (the dot does that):
 
 | State | What it does |
 |---|---|
-| Running | Hops along, leaning forward |
-| Waiting for you | Taps its foot, with a "?" |
-| Done | Jumps for joy, with a "!" (plus a confetti burst when the session finishes) |
-| Failed | Falls over with X eyes |
-| Jean offline | Sleeps ("z") |
+| Sessions running | Pulses softly |
+| Nothing running | Stays still |
+| Jean offline | Dims |
 
-While the notch is collapsed, the mascot holds a pose and fidgets for a few seconds every
-15 s. It animates all the time while the notch is open. This keeps JeanNotch under 1% CPU.
+While the notch is collapsed, the J pulses once every 15 s. It pulses all the time while the
+notch is open. This keeps JeanNotch under 1% CPU. A finished session still gets a confetti burst.
 
 The notch opens and closes with a spring. With **Reduce Motion** on (System Settings ›
-Accessibility › Display), the mascot stays still, confetti is off, and the notch only fades.
+Accessibility › Display), the J stays still, confetti is off, and the notch only fades.
 
 ## Requirements
 
