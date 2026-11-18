@@ -12,6 +12,11 @@ A small macOS app that sits around the MacBook notch and shows the status of eve
 running [Jean](https://github.com/coollabsio/jean) session. It is separate from Jean: it only reads
 Jean's built-in WebSocket server.
 
+<p align="center">
+  <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the mascot and 2 running sessions"><br>
+  <img src="assets/notch-expanded.png" width="380" alt="Expanded notch: running sessions grouped by project and worktree (one row blurred)">
+</p>
+
 - **Collapsed:** a black shape that blends with the notch. Left: the mascot and the number of
   running sessions. Right: a dot for the most urgent state (orange = waiting for you,
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
