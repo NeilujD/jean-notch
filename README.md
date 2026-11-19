@@ -47,10 +47,28 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
 > **Experimental.** These features are off by default. They can change, break, or go away in
 > any release. Turn one on in the menu (**Experimental**).
 
+<p align="center">
+  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked item 'Answer Questions in the Notch'">
+</p>
+
 - **Answer Questions in the Notch.** When a session ends its turn with a question, the
   expanded notch shows a card below the session row: the recap that the assistant wrote, the
   question, and its options. Pick an option, then click **Send**. The session continues with
   your answer.
+
+  <p align="center">
+    <img src="assets/question-text.png" width="400" alt="Card for a question asked as text: the recap 'The login redirect is fixed on fix/login-redirect. 42/42 tests pass.', the question 'How do you want to ship the fix?' and three options"><br>
+    <em>A question asked as text ("Reply with a number:"), with the recap above it.</em>
+  </p>
+  <p align="center">
+    <img src="assets/question-tool.png" width="400" alt="Card for a Claude AskUserQuestion call: a single-select question about the test framework with radio buttons, and a multi-select question about CI checks with check boxes, each option with a description"><br>
+    <em>A Claude <code>AskUserQuestion</code> call: radio buttons for one answer, check boxes for several.</em>
+  </p>
+  <p align="center">
+    <img src="assets/question-picked.png" width="400" alt="The same card with Vitest, Lint, Type check and Unit tests picked, and the orange Send button enabled"><br>
+    <em>Options picked: <strong>Send</strong> turns orange when every question has an answer.</em>
+  </p>
+
   - JeanNotch finds the same questions that Jean shows as buttons: a "Reply with a number:"
     line next to a numbered list of 2 to 8 options, in the last message of the session. Jean's
     prompt asks every agent for this form. A Claude `AskUserQuestion` tool call also gets a
