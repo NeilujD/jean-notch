@@ -22,8 +22,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>build.jean.notch</string>
     <key>CFBundleName</key><string>JeanNotch</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.1.0</string>
-    <key>CFBundleVersion</key><string>6</string>
+    <key>CFBundleShortVersionString</key><string>1.2.0</string>
+    <key>CFBundleVersion</key><string>7</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
