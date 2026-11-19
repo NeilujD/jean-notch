@@ -8,6 +8,8 @@ public struct SessionState: Equatable, Sendable, Identifiable {
     public let id: String
     public var name: String
     public var projectName: String
+    /// Empty when unknown (a session seen only in an event so far).
+    public var projectId = ""
     public var worktreeId: String
     public var worktreeName: String
     public var worktreePath: String
@@ -18,6 +20,9 @@ public struct SessionState: Equatable, Sendable, Identifiable {
     /// A wait that must survive the following `chat:done` (Claude's
     /// AskUserQuestion/ExitPlanMode or denied tools end the run).
     var pendingWait: WaitKind?
+    /// The wait comes from a question in the last message's text (`markAsking`).
+    /// Jean's snapshot has no flag for it, so `load` must keep it.
+    var asksInText = false
 
     /// Lower is more urgent; nil means hidden.
     public var urgency: Int? {
@@ -76,6 +81,7 @@ public struct SessionBoard: Equatable, Sendable {
                     id: dto.id,
                     name: dto.name,
                     projectName: entry.projectName,
+                    projectId: entry.projectId ?? "",
                     worktreeId: entry.worktreeId,
                     worktreeName: entry.worktreeName,
                     worktreePath: entry.worktreePath,
@@ -84,11 +90,12 @@ public struct SessionBoard: Equatable, Sendable {
                 )
                 if let old = sessions[dto.id] {
                     let snapshotIsQuiet = state.status == .idle || state.status == .failed || state.status == .done
-                    if old.changedAt >= requestedAt || (old.unseen && snapshotIsQuiet) {
+                    if old.changedAt >= requestedAt || ((old.unseen || old.asksInText) && snapshotIsQuiet) {
                         state.status = old.status
                         state.unseen = old.unseen
                         state.changedAt = old.changedAt
                         state.pendingWait = old.pendingWait
+                        state.asksInText = old.asksInText
                     } else if old.status == state.status {
                         state.changedAt = old.changedAt
                     }
@@ -170,6 +177,7 @@ public struct SessionBoard: Equatable, Sendable {
             break
         }
 
+        if state.status != .waiting(.question) { state.asksInText = false }
         if state.status != before {
             state.changedAt = now
             switch state.status {
@@ -190,12 +198,30 @@ public struct SessionBoard: Equatable, Sendable {
             id: ref.sessionId,
             name: "New session",
             projectName: sibling?.projectName ?? "",
+            projectId: sibling?.projectId ?? "",
             worktreeId: ref.worktreeId,
             worktreeName: sibling?.worktreeName ?? "",
             worktreePath: sibling?.worktreePath ?? "",
             status: .idle,
             changedAt: now
         )
+    }
+
+    // MARK: Questions asked as text
+
+    /// Moves a finished session to waiting: its last message ends with a question.
+    /// The wait stays until the session's next run, or until `clearAsking`.
+    public mutating func markAsking(_ sessionId: String) {
+        guard sessions[sessionId]?.status == .done else { return }
+        sessions[sessionId]?.status = .waiting(.question)
+        sessions[sessionId]?.asksInText = true
+    }
+
+    /// Undoes `markAsking`: the session is a finished session again, seen or not as before.
+    public mutating func clearAsking(_ sessionId: String) {
+        guard sessions[sessionId]?.asksInText == true else { return }
+        sessions[sessionId]?.status = .done
+        sessions[sessionId]?.asksInText = false
     }
 
     // MARK: Seen

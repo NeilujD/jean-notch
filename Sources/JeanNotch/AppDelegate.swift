@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.orderFrontRegardless()
 
         store.onAlert = { [weak self] in self?.alert($0) }
+        applyExperimental()
         store.start()
 
         NotificationCenter.default.addObserver(
@@ -133,7 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = warningMenu(limit)
             return item
         }
-        menu.items = [mute, login] + limits + [.separator(), quit]
+        let experimental = NSMenuItem(title: "Experimental", action: nil, keyEquivalent: "")
+        experimental.submenu = experimentalMenu()
+        menu.items = [mute, login] + limits + [experimental, .separator(), quit]
 
         if let event, let view {
             NSMenu.popUpContextMenu(menu, with: event, for: view)
@@ -164,6 +167,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(custom)
         }
         return menu
+    }
+
+    private func experimentalMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(.sectionHeader(title: ExperimentalFeature.notice))
+        for feature in ExperimentalFeature.allCases {
+            let item = NSMenuItem(title: feature.title, action: #selector(toggleExperimental(_:)), keyEquivalent: "")
+            item.representedObject = feature.rawValue
+            item.target = self
+            item.state = feature.isOn ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func toggleExperimental(_ sender: NSMenuItem) {
+        guard let feature = (sender.representedObject as? String).flatMap(ExperimentalFeature.init) else { return }
+        feature.isOn.toggle()
+        applyExperimental()
+    }
+
+    private func applyExperimental() {
+        store.answersQuestions = ExperimentalFeature.answerQuestions.isOn
     }
 
     @objc private func setWarning(_ sender: NSMenuItem) {
