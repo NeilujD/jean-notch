@@ -8,10 +8,24 @@ Title: Conventional Commit, it sets the next version.
 
 ## Summary
 
-<!-- What changed and why, for reviewers. -->
+<!-- The smallest view that makes the change clear: a call tree, a diff sketch, a file tree or a diagram, with one or two lines of text. -->
+
+## Evidence
+
+<!-- Proof that it works: screenshots for visual changes, else test or command output. -->
+
+- **Before:**
+  **After:**
+
+## Merge Danger
+
+**Door:** <!-- one-way (hard to undo) or two-way (easy to revert) -->
+
+**Blast Radius:** <!-- one word, then what could break -->
 
 ## Release notes
 
 <!-- User-facing text for the GitHub Release, in Markdown. It goes under a heading made from the PR title.
 Write "none" for a change users do not see. Leave it empty to use only the title.
-For a breaking change, add a level-3 heading named Migration that says what users must do. -->
+For a breaking change, add a level-3 heading named Migration that says what users must do.
+Image URLs must point to main, not to this branch. -->
