@@ -219,7 +219,7 @@ public final class SessionStore {
                     ])
                     pending = try ServerMessage.decodeData(SessionDetail.self, from: raw).pendingQuestion
                 } catch {
-                    storeLog.error("get_session failed: \(String(describing: error), privacy: .public)")
+                    storeLog.error("get_session failed: \(String(describing: error), privacy: .private)")
                 }
             }
             guard !Task.isCancelled, let self else { return }
@@ -269,7 +269,7 @@ public final class SessionStore {
                 if let mcpConfig = context.mcpConfig { args["mcpConfig"] = mcpConfig }
                 _ = try await client.invoke("send_chat_message", args: args)
             } catch {
-                storeLog.error("send_chat_message failed: \(String(describing: error), privacy: .public)")
+                storeLog.error("send_chat_message failed: \(String(describing: error), privacy: .private)")
                 guard let self, self.answering.contains(question.id) else { return }
                 self.answering.remove(question.id)
                 // The socket can drop after Jean took the message, so this is not a sure failure.
