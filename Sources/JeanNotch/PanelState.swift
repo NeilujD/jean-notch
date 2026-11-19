@@ -1,4 +1,5 @@
 import Foundation
+import JeanNotchCore
 import Observation
 
 /// Whether the notch is expanded: while hovered, and for a few seconds after an alert.
@@ -10,6 +11,8 @@ final class PanelState {
     private(set) var alerting = false
     /// Start of the current confetti burst, if any.
     private(set) var celebration: Date?
+    /// Picked options by question id. Kept here so they stay when the notch collapses.
+    private(set) var picks: [String: PendingQuestion.Picks] = [:]
 
     var expanded: Bool { hovering || alerting }
 
@@ -40,6 +43,17 @@ final class PanelState {
             guard !Task.isCancelled else { return }
             self?.alerting = false
         }
+    }
+
+    /// A single-select question keeps one option; a second click on it clears it.
+    func togglePick(_ option: Int, in question: Int, of id: String, multiSelect: Bool) {
+        var picked = picks[id]?[question] ?? []
+        if multiSelect {
+            picked.formSymmetricDifference([option])
+        } else {
+            picked = picked == [option] ? [] : [option]
+        }
+        picks[id, default: [:]][question] = picked
     }
 
     func celebrate() {

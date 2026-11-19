@@ -138,6 +138,8 @@ public struct AllSessionsResponse: Decodable, Equatable, Sendable {
     public let entries: [Entry]
 
     public struct Entry: Decodable, Equatable, Sendable {
+        /// Absent only in old snapshots.
+        public let projectId: String?
         public let projectName: String
         public let worktreeId: String
         public let worktreeName: String

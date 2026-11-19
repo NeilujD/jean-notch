@@ -187,6 +187,13 @@ struct NotchView: View {
                         SessionRow(
                             session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now
                         ) { actions.open(session) }
+                        if let question = store.questions[session.id] {
+                            QuestionCard(
+                                pending: question, panel: panel,
+                                sending: store.answering.contains(question.id),
+                                failure: store.answerErrors[question.id]
+                            ) { store.answer(question, in: session, with: $0) }
+                        }
                     }
                 }
             }
@@ -247,6 +254,113 @@ private struct SessionRow: View {
         case ..<3600: return "\(seconds / 60)m"
         case ..<86400: return "\(seconds / 3600)h"
         default: return "\(seconds / 86400)d"
+        }
+    }
+}
+
+/// Experimental: the question a session waits on, with what led to it. The user picks
+/// options, then sends them. Two clicks, because the notch can open under the pointer.
+private struct QuestionCard: View {
+    let pending: PendingQuestion
+    let panel: PanelState
+    let sending: Bool
+    let failure: String?
+    let send: (PendingQuestion.Picks) -> Void
+
+    private var picks: PendingQuestion.Picks { panel.picks[pending.id] ?? [:] }
+    private var canSend: Bool { !sending && pending.isAnswered(by: picks) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !pending.situation.isEmpty {
+                Text(Self.inlineMarkdown(pending.situation))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(8)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(pending.questions.enumerated()), id: \.offset) { index, question in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(question.question)
+                        .font(.system(size: 11, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(Array(question.options.enumerated()), id: \.offset) { option, choice in
+                        OptionRow(
+                            option: choice, multiSelect: question.multiSelect,
+                            picked: picks[index]?.contains(option) == true
+                        ) {
+                            panel.togglePick(option, in: index, of: pending.id, multiSelect: question.multiSelect)
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 6) {
+                Text(failure ?? "Experimental · for a different answer, open Jean")
+                    .font(.system(size: 9))
+                    .foregroundStyle(failure == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.red))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button(sending ? "Sending" : "Send") { send(picks) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Capsule().fill(canSend ? Urgency.waiting.color : .white.opacity(0.12)))
+                    .foregroundStyle(canSend ? .black : .secondary)
+                    .disabled(!canSend)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07)))
+        .foregroundStyle(.white)
+        .padding(.bottom, 2)
+    }
+
+    /// Bold, italic and code only. Links are removed: the text comes from a model, and a
+    /// link in the notch must not open on a click.
+    static func inlineMarkdown(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        guard var styled = try? AttributedString(markdown: text, options: options) else {
+            return AttributedString(text)
+        }
+        styled.link = nil
+        return styled
+    }
+}
+
+private struct OptionRow: View {
+    let option: PendingQuestion.Option
+    let multiSelect: Bool
+    let picked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 10))
+                    .foregroundStyle(picked ? AnyShapeStyle(Urgency.waiting.color) : AnyShapeStyle(.secondary))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.label).font(.system(size: 11))
+                    if let description = option.description, !description.isEmpty {
+                        Text(description).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 3).padding(.horizontal, 6)
+            .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(picked ? 0.12 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(picked ? .isSelected : [])
+    }
+
+    private var symbol: String {
+        switch (multiSelect, picked) {
+        case (true, true): "checkmark.square.fill"
+        case (true, false): "square"
+        case (false, true): "largecircle.fill.circle"
+        case (false, false): "circle"
         }
     }
 }

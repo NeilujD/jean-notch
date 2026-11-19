@@ -10,7 +10,7 @@
 
 A small macOS app that sits around the MacBook notch and shows the status of every
 running [Jean](https://github.com/coollabsio/jean) session. It is separate from Jean: it only reads
-Jean's built-in WebSocket server.
+Jean's built-in WebSocket server, unless you turn on an [experimental feature](#experimental-features).
 
 <p align="center">
   <img src="assets/notch-collapsed.png" width="380" alt="Collapsed notch: the thin J, one running session, and an orange dot for a session waiting for you"><br>
@@ -39,7 +39,68 @@ Jean's built-in WebSocket server.
   limit is over 80%, the collapsed notch shows an orange ⚠. Change the limit in the menu
   (**Usage Warning**) or with `defaults write build.jean.notch usageWarning -int 90`
   (0 turns it off). Jean's other agents (OpenCode, Cursor, Pi, and so on) give no usage data.
-- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning, Quit.
+- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning,
+  Experimental, Quit.
+
+### Experimental features
+
+> **Experimental.** These features are off by default. They can change, break, or go away in
+> any release. Turn one on in the menu (**Experimental**).
+
+<p align="center">
+  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked item 'Answer Questions in the Notch'">
+</p>
+
+- **Answer Questions in the Notch.** When a session ends its turn with a question, the
+  expanded notch shows a card below the session row: the recap that the assistant wrote, the
+  question, and its options. Pick an option, then click **Send**. The session continues with
+  your answer.
+
+  <p align="center">
+    <img src="assets/question-text.png" width="400" alt="Card for a question asked as text: the recap 'The login redirect is fixed on fix/login-redirect. 42/42 tests pass.', the question 'How do you want to ship the fix?' and three options"><br>
+    <em>A question asked as text ("Reply with a number:"), with the recap above it.</em>
+  </p>
+  <p align="center">
+    <img src="assets/question-tool.png" width="400" alt="Card for a Claude AskUserQuestion call: a single-select question about the test framework with radio buttons, and a multi-select question about CI checks with check boxes, each option with a description"><br>
+    <em>A Claude <code>AskUserQuestion</code> call: radio buttons for one answer, check boxes for several.</em>
+  </p>
+  <p align="center">
+    <img src="assets/question-picked.png" width="400" alt="The same card with Vitest, Lint, Type check and Unit tests picked, and the orange Send button enabled"><br>
+    <em>Options picked: <strong>Send</strong> turns orange when every question has an answer.</em>
+  </p>
+
+  - JeanNotch finds the same questions that Jean shows as buttons: a "Reply with a number:"
+    line next to a numbered list of 2 to 8 options, in the last message of the session. Jean's
+    prompt asks every agent for this form. A Claude `AskUserQuestion` tool call also gets a
+    card, with check boxes for a question that takes several answers. Claude has that tool
+    only in Supervised mode, or in Full access mode with Chrome on (Jean then gives Claude a
+    permission tool, and the Claude CLI shows the question tool only with one).
+  - The session row changes from "Done" to "Question". It stays in the list until the next run
+    of the session starts, or until you turn the feature off.
+  - The card needs two clicks (pick, then send), because the notch can open under your pointer.
+  - JeanNotch sends your answer as a chat message. For a question asked as text, the message is
+    the same as the one that Jean's button sends (for example "2. Blue"). Jean starts the next
+    run with the model and mode that the session has.
+  - JeanNotch sends the same MCP servers as Jean's window: the session's list, else the
+    project's, else your default list, plus servers that Jean has not seen before. It also
+    sends Jean's Chrome switch. It reads these settings when you click **Send**, so a change
+    in Jean applies at once.
+  - For an `AskUserQuestion` card, JeanNotch also saves your answer in the session, as Jean's
+    own card does, so Jean shows which options you picked. On the first message of a session,
+    Jean's automatic naming can probably overwrite that saved answer. The answer is still sent.
+  - The notch cannot take keyboard input. To type a different answer, click the session row
+    and answer in Jean.
+  - JeanNotch finds a question asked as text when a run ends. It does not find one that was
+    asked before JeanNotch started. The alert for such a run is still the "done" sound and
+    confetti.
+  - Plan approvals, permission requests, and Codex or OpenCode question tools have no card yet.
+  - While this is on, JeanNotch reads the last run of each session that ends a run
+    (`get_session`). When you click **Send**, it also reads the project and preference
+    lists and the MCP servers (`list_projects`, `load_preferences`, `get_mcp_servers`), and
+    for an `AskUserQuestion` card it saves the answer (`update_session_state`).
+    While it is off, JeanNotch sends no message to a session.
+  - `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns it on
+    (restart JeanNotch after).
 
 ### The mascot
 

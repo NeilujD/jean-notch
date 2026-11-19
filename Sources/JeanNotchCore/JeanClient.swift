@@ -149,7 +149,7 @@ public actor JeanClient {
 
     /// Sends `{"type":"invoke"}` and returns the raw response message; decode it
     /// with `ServerMessage.decodeData`.
-    public func invoke(_ command: String, args: [String: String] = [:]) async throws -> Data {
+    public func invoke(_ command: String, args: [String: any Sendable] = [:]) async throws -> Data {
         guard let task else { throw ClientError.notConnected }
         let id = UUID().uuidString
         let body = try JSONSerialization.data(withJSONObject: [
