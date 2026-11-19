@@ -153,3 +153,36 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.sessions["s"]?.status == .idle)
     #expect(board.runningCount == 0)
 }
+
+@Test func textQuestionWaitSurvivesSnapshotsUntilTheNextRun() throws {
+    var board = try board("s")
+    _ = board.apply(.sending(ref("s")), now: t0)
+    _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0)
+    board.markAsking("s")
+    #expect(board.sessions["s"]?.status == .waiting(.question))
+    #expect(board.mostUrgent == .waiting)
+
+    board.markSeen("s")
+    board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(60))
+    #expect(board.sessions["s"]?.status == .waiting(.question))
+
+    _ = board.apply(.sending(ref("s")), now: t0.addingTimeInterval(61))
+    _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0.addingTimeInterval(62))
+    board.markSeen("s")
+    board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(120))
+    #expect(board.sessions["s"]?.status == .idle)
+}
+
+@Test func clearAskingEndsOnlyATextQuestionWait() throws {
+    var board = try board("text", "tool", "idle")
+    for id in ["text", "tool"] { _ = board.apply(.sending(ref(id)), now: t0) }
+    _ = board.apply(.done(ref("text"), waitingForPlan: false), now: t0)
+    _ = board.apply(.toolUse(ref("tool"), name: "AskUserQuestion"), now: t0)
+    for id in ["text", "tool", "idle"] { board.markAsking(id) }
+    #expect(board.sessions["idle"]?.status == .idle)
+
+    for id in ["text", "tool"] { board.clearAsking(id) }
+    #expect(board.sessions["text"]?.status == .done)
+    #expect(board.sessions["text"]?.unseen == true)
+    #expect(board.sessions["tool"]?.status == .waiting(.question))
+}
