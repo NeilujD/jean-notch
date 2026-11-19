@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # After each merge: open or update the release PR (branch release/next).
+  # Uses the RELEASE_TOKEN PAT so CI runs on the release PR (GITHUB_TOKEN pushes trigger no workflows).
+  release-pr:
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore(release): v') }}"
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - name: Update release PR
+        run: python3 scripts/release.py prepare
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # The release PR was merged: build the app, tag the commit, publish the GitHub Release.
+  publish:
+    if: "${{ startsWith(github.event.head_commit.message, 'chore(release): v') }}"
+    runs-on: macos-26
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Release notes
+        id: notes
+        run: echo "tag=v$(python3 scripts/release.py publish-notes "$GITHUB_SHA" notes.md)" >> "$GITHUB_OUTPUT"
+      - name: Build app
+        run: |
+          scripts/bundle.sh
+          ditto -c -k --keepParent build/JeanNotch.app "JeanNotch-$TAG.zip"
+        env:
+          TAG: ${{ steps.notes.outputs.tag }}
+      - name: Tag and publish
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "$TAG"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+            gh release upload "$TAG" "JeanNotch-$TAG.zip" --clobber
+          else
+            gh release create "$TAG" "JeanNotch-$TAG.zip" --title "JeanNotch $TAG" --notes-file notes.md --verify-tag
+          fi
+        env:
+          TAG: ${{ steps.notes.outputs.tag }}
