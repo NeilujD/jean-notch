@@ -147,7 +147,9 @@ Releases are automated (`.github/workflows/release.yml`, `scripts/release.py`):
    GitHub Release. The notes copy this README's **Known limits** section.
 
 Setup: a fine-grained token (this repo only; Contents and Pull requests: read and write) in the
-`RELEASE_TOKEN` secret, so CI runs on the release PR.
+`RELEASE_TOKEN` secret, so CI runs on the release PR. Run `scripts/setup-release-token.sh`: it
+walks you through creating the token, checks it and saves the secret. Run it again to renew the
+token before it expires.
 
 ## License
 
