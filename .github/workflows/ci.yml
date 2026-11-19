@@ -19,3 +19,10 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+
+  release-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test release script
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v

@@ -125,6 +125,16 @@ Accessibility › Display), the J stays still, confetti is off, and the notch on
 - Swift 6 toolchain (Command Line Tools are enough; Xcode is not needed).
 - Jean with its HTTP server enabled.
 
+## Install
+
+Download `JeanNotch-vX.Y.Z.zip` from the [latest release](https://github.com/NeilujD/jean-notch/releases/latest),
+unzip it and move `JeanNotch.app` to Applications. The app is ad-hoc signed, not notarized, so
+remove the quarantine flag once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/JeanNotch.app
+```
+
 ## Build and run
 
 ```sh
@@ -179,6 +189,28 @@ The pixel "J" and its palette are a nod to Jean's logo.
 - A session waiting on a Claude question or plan is detected from the `AskUserQuestion` /
   `ExitPlanMode` tool event or from the snapshot's `waiting_for_input`.
 - The status list shows at most 12 sessions ("+N more" for the rest).
+
+## Releasing
+
+Releases are automated (`.github/workflows/release.yml`, `scripts/release.py`):
+
+1. **PR title** is a Conventional Commit and sets the version bump: `feat:` → New (minor),
+   `fix:` → Fix (patch), `perf:` / `refactor:` → Improvement (patch), `!` after the type or a
+   `BREAKING CHANGE:` line → Breaking change (major). `docs:`, `ci:`, `chore:`, `test:`,
+   `build:`, `style:`, `revert:` stay out of the notes. The `pr-title` check enforces it.
+2. **`## Release notes`** in the PR body is the user-facing text (from the PR template). Write
+   `none` to leave the PR out; leave it empty to use only the title. A breaking change needs a
+   `### Migration` part.
+3. PRs are **squash merged**. After each merge to `main`, a bot updates the release PR
+   `chore(release): vX.Y.Z` (branch `release/next`): next version, build number in
+   `scripts/bundle.sh`, and the full notes. Write an optional intro between its highlights markers.
+4. **Merging the release PR** builds `JeanNotch-vX.Y.Z.zip`, tags the commit and publishes the
+   GitHub Release. The notes copy this README's **Known limits** section.
+
+Setup: a fine-grained token (this repo only; Contents and Pull requests: read and write) in the
+`RELEASE_TOKEN` secret, so CI runs on the release PR. Run `scripts/setup-release-token.sh`: it
+walks you through creating the token, checks it and saves the secret. Run it again to renew the
+token before it expires.
 
 ## License
 
