@@ -19,6 +19,7 @@ BUMP_INDEX = {"breaking": 0, "new": 1, "improvement": 2, "fix": 2}  # major, min
 SKIP_NOTES = {"none", "n/a", "-"}
 
 RELEASE_PREFIX = "chore(release): v"
+RELEASE_SUBJECT = re.compile(r"^chore\(release\): v(\d+\.\d+\.\d+)(?: \(#\d+\))?$")
 BRANCH = "release/next"
 BUNDLE = "scripts/bundle.sh"
 HIGHLIGHTS = ("<!-- highlights:start -->", "<!-- highlights:end -->")
@@ -33,7 +34,11 @@ def parse_title(title):
 
 
 def strip_comments(text):
-    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+    """Remove HTML comments, then neutralise any left-over `<!--` so PR text cannot forge markers."""
+    prev = None
+    while prev != text:
+        prev, text = text, re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    return text.replace("<!--", "&lt;!--").strip()
 
 
 def section(markdown, heading, level=2):
@@ -64,8 +69,10 @@ def kind_of(title, body):
     return KIND_BY_TYPE.get(parsed["type"])
 
 
-def check_pr(title, body):
+def check_pr(title, body, head="", fork=False):
     """Errors for a PR title and body. Empty list = valid."""
+    if title.startswith(RELEASE_PREFIX) and (head != BRANCH or fork):
+        return [f'Only the bot release PR (branch {BRANCH}) may use a "{RELEASE_PREFIX}" title.']
     parsed = parse_title(title)
     if not parsed:
         return [f'Title "{title}" is not a Conventional Commit: use "type: description" or "type(scope)!: description".']
@@ -179,10 +186,11 @@ def run(*cmd, stdin=None):
 
 def last_release():
     """(version, ref) of the last release: the newest release commit on HEAD, else the newest v* tag."""
-    line = run("git", "log", "-1", "--format=%H %s", "--grep=^chore(release): v", "HEAD")
-    if line:
-        sha, subject = line.split(" ", 1)
-        return re.search(r"v(\d+\.\d+\.\d+)", subject).group(1), sha
+    for line in run("git", "log", "--first-parent", "--format=%H %s", "HEAD").splitlines():
+        sha, _, subject = line.partition(" ")
+        m = RELEASE_SUBJECT.match(subject)
+        if m:
+            return m.group(1), sha
     tag = run("git", "describe", "--tags", "--abbrev=0", "--match", "v*")
     return tag[1:], tag
 
@@ -214,7 +222,9 @@ def prepare(repo, dry_run):
         return
     with open("README.md") as f:
         notes = render_notes(repo, prev, version, entries, section(f.read(), "Known limits"))
-    existing = json.loads(run("gh", "pr", "list", "--repo", repo, "--head", BRANCH, "--state", "open", "--json", "number,body"))
+    existing = [p for p in json.loads(run("gh", "pr", "list", "--repo", repo, "--head", BRANCH, "--state", "open",
+                                          "--json", "number,body,isCrossRepository"))
+                if not p["isCrossRepository"]]
     highlights = between(existing[0]["body"], HIGHLIGHTS) if existing else ""
     body = release_body(version, highlights or "", notes)
     title = f"{RELEASE_PREFIX}{version}"
@@ -251,7 +261,8 @@ def main(argv):
     repo = os.environ.get("GITHUB_REPOSITORY", "NeilujD/jean-notch")
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "check-pr":
-        errors = check_pr(os.environ.get("PR_TITLE", ""), os.environ.get("PR_BODY", ""))
+        errors = check_pr(os.environ.get("PR_TITLE", ""), os.environ.get("PR_BODY", ""),
+                          os.environ.get("PR_HEAD", ""), os.environ.get("PR_FORK") == "true")
         for e in errors:
             print(f"::error::{e}")
         return 1 if errors else 0

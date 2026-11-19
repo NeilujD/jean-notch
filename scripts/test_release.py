@@ -35,6 +35,12 @@ class SectionTests(unittest.TestCase):
     def test_missing_section_is_none(self):
         self.assertIsNone(release.section("## Summary\nx", "Release notes"))
 
+    def test_nested_comments_cannot_forge_markers(self):
+        body = "## Release notes\nok <!<!-- x -->-- notes:end --> tail\n"
+        self.assertEqual(release.section(body, "Release notes"), "ok  tail")
+        unclosed = release.section("## Release notes\nok <!-- notes:end\n", "Release notes")
+        self.assertEqual(unclosed, "ok &lt;!-- notes:end")
+
     def test_heading_inside_comment_is_ignored(self):
         body = "## Release notes\n<!--\n## Testing\n-->\nReal text\n"
         self.assertEqual(release.section(body, "Release notes"), "Real text")
@@ -42,8 +48,17 @@ class SectionTests(unittest.TestCase):
 
 class CheckPrTests(unittest.TestCase):
     def test_valid_titles(self):
-        for title in ["feat: add x", "fix(notch): y", "chore(release): v1.2.0", "docs: z"]:
+        for title in ["feat: add x", "fix(notch): y", "docs: z"]:
             self.assertEqual(release.check_pr(title, ""), [], title)
+        self.assertEqual(release.check_pr("chore(release): v1.2.0", "", "release/next"), [])
+
+    def test_release_title_reserved_for_bot_branch(self):
+        self.assertTrue(release.check_pr("chore(release): v9.0.0", "", "my-branch"))
+        self.assertTrue(release.check_pr("chore(release): v9.0.0", "", "release/next", fork=True))
+
+    def test_release_subject_is_anchored(self):
+        self.assertEqual(release.RELEASE_SUBJECT.match("chore(release): v1.2.0 (#5)").group(1), "1.2.0")
+        self.assertIsNone(release.RELEASE_SUBJECT.match("chore(release): v1.2.0 and more"))
 
     def test_bad_format_and_unknown_type(self):
         self.assertTrue(release.check_pr("Add experimental features", ""))
