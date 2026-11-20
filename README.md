@@ -19,9 +19,18 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
 
 - **Collapsed:** a black shape that blends with the notch. Left: the J and the number of
   running sessions. Right: a dot for the most urgent state (orange = waiting for you,
-  red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
+  red = failed, green = done and unread). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
-  project › worktree, sorted waiting → failed → running → done. Idle and seen sessions are hidden.
+  project › worktree, sorted waiting → failed → running → done. The notch shows the same
+  unread sessions as Jean: a waiting, failed, or done session stays until you open it in Jean
+  or click its row. Running sessions always show; idle and read sessions are hidden.
+- **PR badge:** a worktree with a pull request shows one badge after its name:
+  ✕ CI failing (red), ● Changes requested (orange), ◌ CI running (gray), ✓ Ready (green),
+  or ⇡ Merged (purple), with the PR number. A closed PR or no PR shows no badge. The badge
+  shows the last PR state Jean knows. Jean checks PRs only while its window is in front:
+  every 5 minutes, and faster for the open worktree. "Changes requested" shows only after
+  such a check while JeanNotch runs (Jean does not save the review state). A badge change
+  plays no sound and does not expand the notch.
 - **Tokens:** each row shows the session's total tokens, for example "3.2M"
   (k = thousand, M = million). The total counts input, output, and cache reads and
   writes, summed over all runs. Jean saves a run's usage when the run ends, so the count
@@ -29,9 +38,11 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   default limit is 10 million. Change it in the menu (**Token Warning**), or set any value with
   `defaults write build.jean.notch tokenWarning -int 3000000` (0 turns it off).
 - **Alert:** when a session starts waiting, finishes, or fails, the notch expands and plays a
-  soft system sound (mute it in the menu). A finished session stays "unseen" until you click
-  its row or bring Jean to the front.
-- **Click a row:** brings Jean to the front and asks it to select that session.
+  soft system sound (mute it in the menu). Bringing Jean to the front does not mark sessions read.
+- **Click a row:** brings Jean to the front and asks it to select that session. This marks the
+  session read, in Jean and in the notch.
+- **Mark All Read** (menu, with the unread count): marks every unread session read, in the
+  notch and in Jean. Jean's unread count goes to 0.
 - **Plan usage:** the bottom of the expanded panel shows how much of each plan limit you
   used, for Claude, Codex and Grok, and the time until it resets
   (for example "Claude  5h 1% · 4h55  week 29% · 5d"). A provider you are not logged in to
@@ -39,8 +50,8 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   limit is over 80%, the collapsed notch shows an orange ⚠. Change the limit in the menu
   (**Usage Warning**) or with `defaults write build.jean.notch usageWarning -int 90`
   (0 turns it off). Jean's other agents (OpenCode, Cursor, Pi, and so on) give no usage data.
-- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning,
-  Experimental, Quit.
+- **Gear or right-click:** Mute Sounds, Launch at Login, Mark All Read, Token Warning,
+  Usage Warning, Experimental, Quit.
 
 ### Experimental features
 

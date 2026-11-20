@@ -14,8 +14,8 @@ public struct SessionState: Equatable, Sendable, Identifiable {
     public var worktreeName: String
     public var worktreePath: String
     public var status: SessionStatus
-    /// Done/failed result the user has not looked at yet.
-    public var unseen = false
+    /// Jean counts the session as unread: it has news the user has not opened in Jean yet.
+    public var unread = false
     public var changedAt: Date
     /// A wait that must survive the following `chat:done` (Claude's
     /// AskUserQuestion/ExitPlanMode or denied tools end the run).
@@ -27,10 +27,10 @@ public struct SessionState: Equatable, Sendable, Identifiable {
     /// Lower is more urgent; nil means hidden.
     public var urgency: Int? {
         switch status {
-        case .waiting: 0
-        case .failed: unseen ? 1 : nil
+        case .waiting: unread ? 0 : nil
+        case .failed: unread ? 1 : nil
         case .running: 2
-        case .done: unseen ? 3 : nil
+        case .done: unread ? 3 : nil
         case .idle: nil
         }
     }
@@ -58,6 +58,11 @@ public enum Urgency: Equatable, Sendable {
 /// Pure session-status reducer. No I/O, so tests drive it directly.
 public struct SessionBoard: Equatable, Sendable {
     public private(set) var sessions: [String: SessionState] = [:]
+    /// Badge of each worktree's PR, by worktree id: from Jean's cached PR state, or from a
+    /// later `pr:status-update`, which wins until the cached state changes.
+    public private(set) var prBadges: [String: PrBadge] = [:]
+    /// The cached PR state each badge was last seeded from.
+    private var prCache: [String: PrStatus] = [:]
 
     public init() {}
 
@@ -71,8 +76,8 @@ public struct SessionBoard: Equatable, Sendable {
     // MARK: Snapshot
 
     /// Replaces the board with `snapshot`, keeping live knowledge the snapshot can't carry:
-    /// unseen results, sticky waits, and anything changed after `requestedAt`
-    /// (events that raced the in-flight request).
+    /// unread flags (`loadUnread` sets them), sticky waits, and anything changed after
+    /// `requestedAt` (events that raced the in-flight request).
     public mutating func load(_ snapshot: AllSessionsResponse, requestedAt: Date) {
         var next: [String: SessionState] = [:]
         for entry in snapshot.entries {
@@ -89,10 +94,10 @@ public struct SessionBoard: Equatable, Sendable {
                     changedAt: dto.updatedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) } ?? requestedAt
                 )
                 if let old = sessions[dto.id] {
+                    state.unread = old.unread
                     let snapshotIsQuiet = state.status == .idle || state.status == .failed || state.status == .done
-                    if old.changedAt >= requestedAt || ((old.unseen || old.asksInText) && snapshotIsQuiet) {
+                    if old.changedAt >= requestedAt || (old.asksInText && snapshotIsQuiet) {
                         state.status = old.status
-                        state.unseen = old.unseen
                         state.changedAt = old.changedAt
                         state.pendingWait = old.pendingWait
                         state.asksInText = old.asksInText
@@ -113,6 +118,7 @@ public struct SessionBoard: Equatable, Sendable {
         if dto.hasPendingApproval { return .waiting(.permission) }
         switch dto.lastRunStatus {
         case "running", "resumable": return .running
+        case "completed": return .done
         case "crashed": return .failed
         default: return .idle
         }
@@ -125,6 +131,12 @@ public struct SessionBoard: Equatable, Sendable {
         switch event {
         case .structureChanged, .resync:
             return ApplyResult(needsSnapshot: true)
+        case .prStatus(let status):
+            // No alert: a PR change never expands the notch or plays a sound.
+            prBadges[status.worktreeId] = PrBadge(status)
+            return ApplyResult()
+        case .unreadChanged:
+            return ApplyResult()
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
              .permissionDenied(let r), .approvalRequest(let r, _), .toolUse(let r, _):
             ref = r
@@ -136,12 +148,13 @@ public struct SessionBoard: Equatable, Sendable {
             return placeholder(for: ref, now: now)
         }()
         let before = state.status
+        // A run ended with a result: news even when a stale snapshot already showed that status.
+        var runEnded = false
 
         switch event {
         case .sending:
             state.status = .running
             state.pendingWait = nil
-            state.unseen = false
         case .done(_, let waitingForPlan):
             if waitingForPlan {
                 state.status = .waiting(.plan)
@@ -149,16 +162,15 @@ public struct SessionBoard: Equatable, Sendable {
                 state.status = .waiting(wait)
             } else {
                 state.status = .done
-                state.unseen = true
+                runEnded = true
             }
             state.pendingWait = nil
         case .failed:
             state.status = .failed
-            state.unseen = true
+            runEnded = true
             state.pendingWait = nil
         case .cancelled:
             state.status = .idle
-            state.unseen = false
             state.pendingWait = nil
         case .permissionDenied:
             state.status = .waiting(.permission)
@@ -173,15 +185,18 @@ public struct SessionBoard: Equatable, Sendable {
                 // A tool ran: any mid-run approval was answered.
                 state.status = .running
             }
-        case .structureChanged, .resync:
+        case .structureChanged, .unreadChanged, .resync, .prStatus:
             break
         }
 
         if state.status != .waiting(.question) { state.asksInText = false }
-        if state.status != before {
+        if state.status != before || runEnded {
             state.changedAt = now
             switch state.status {
-            case .waiting, .done, .failed: result.alert = state
+            case .waiting, .done, .failed:
+                // Jean marks it unread too, unless the user has it open; the next `loadUnread` says.
+                state.unread = true
+                result.alert = state
             case .idle, .running: break
             }
         }
@@ -207,6 +222,15 @@ public struct SessionBoard: Equatable, Sendable {
         )
     }
 
+    /// Seeds badges from Jean's cached PR states (`list_worktrees`), by worktree id.
+    /// Only a changed entry replaces a badge, so a live event stays until Jean saves a newer state.
+    public mutating func loadPrCache(_ cache: [String: PrStatus]) {
+        for id in Set(cache.keys).union(prCache.keys) where cache[id] != prCache[id] {
+            prBadges[id] = cache[id].flatMap(PrBadge.init)
+        }
+        prCache = cache
+    }
+
     // MARK: Questions asked as text
 
     /// Moves a finished session to waiting: its last message ends with a question.
@@ -217,21 +241,30 @@ public struct SessionBoard: Equatable, Sendable {
         sessions[sessionId]?.asksInText = true
     }
 
-    /// Undoes `markAsking`: the session is a finished session again, seen or not as before.
+    /// Undoes `markAsking`: the session is a finished session again, read or not as before.
     public mutating func clearAsking(_ sessionId: String) {
         guard sessions[sessionId]?.asksInText == true else { return }
         sessions[sessionId]?.status = .done
         sessions[sessionId]?.asksInText = false
     }
 
-    // MARK: Seen
+    // MARK: Unread (Jean's state)
 
-    public mutating func markSeen(_ sessionId: String) {
-        sessions[sessionId]?.unseen = false
+    /// Sets the unread flags from Jean's `list_unread_sessions` ids. A session changed after
+    /// `requestedAt` keeps its flag: the event raced the request.
+    public mutating func loadUnread(_ ids: Set<String>, requestedAt: Date) {
+        for (id, state) in sessions where state.changedAt < requestedAt {
+            sessions[id]?.unread = ids.contains(id)
+        }
     }
 
-    public mutating func markAllSeen() {
-        for id in sessions.keys { sessions[id]?.unseen = false }
+    /// Clears the flag before Jean confirms: a row click or Mark All Read asks Jean to do the same.
+    public mutating func markRead(_ ids: some Sequence<String>) {
+        for id in ids { sessions[id]?.unread = false }
+    }
+
+    public var unreadIds: Set<String> {
+        Set(sessions.values.filter(\.unread).map(\.id))
     }
 
     // MARK: Views of the board
@@ -264,10 +297,10 @@ public struct SessionBoard: Equatable, Sendable {
     }
 
     public var mostUrgent: Urgency? {
-        let values = sessions.values
-        if values.contains(where: { if case .waiting = $0.status { true } else { false } }) { return .waiting }
-        if values.contains(where: { $0.status == .failed && $0.unseen }) { return .failed }
-        if values.contains(where: { $0.status == .done && $0.unseen }) { return .done }
+        let unread = sessions.values.filter(\.unread)
+        if unread.contains(where: { if case .waiting = $0.status { true } else { false } }) { return .waiting }
+        if unread.contains(where: { $0.status == .failed }) { return .failed }
+        if unread.contains(where: { $0.status == .done }) { return .done }
         return nil
     }
 }

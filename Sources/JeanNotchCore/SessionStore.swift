@@ -42,6 +42,7 @@ public final class SessionStore {
     @ObservationIgnored private let client: JeanClient
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var unreadTask: Task<Void, Never>?
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var usageTask: Task<Void, Never>?
     /// One entry per session whose question was requested, so each is requested once.
@@ -87,6 +88,9 @@ public final class SessionStore {
                 stopErrors[ref.sessionId] = nil
                 loadTokens(ref.sessionId)
                 scheduleUsageRefresh(after: .seconds(2))
+                scheduleUnreadRefresh()
+            case .unreadChanged:
+                scheduleUnreadRefresh()
             case .sending(let ref) where tokens[ref.sessionId] == nil:
                 loadTokens(ref.sessionId)
             default:
@@ -120,10 +124,53 @@ public final class SessionStore {
                     }
                 }
                 self.syncQuestions()
+                self.scheduleUnreadRefresh(after: .zero)
+                await self.loadPrCache()
                 let total = snapshot.entries.reduce(0) { $0 + $1.sessions.count }
                 storeLog.info("Snapshot: \(snapshot.entries.count) worktrees, \(total) sessions, \(self.board.visibleGroups.count) visible groups, \(self.board.runningCount) running")
             } catch {
                 storeLog.error("Snapshot failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Reads the PR state Jean saved on the worktrees of every project with sessions: a worktree
+    /// can become visible later (unread list, new run) without a new snapshot.
+    /// Jean checks PRs only while its window is focused, so this is the state at its last check.
+    private func loadPrCache() async {
+        let projectIds = Set(board.sessions.values.map(\.projectId)).subtracting([""])
+        var cache: [String: PrStatus] = [:]
+        for projectId in projectIds {
+            do {
+                let raw = try await client.invoke("list_worktrees", args: ["projectId": projectId])
+                for worktree in try ServerMessage.decodeData([CachedWorktreePr].self, from: raw) {
+                    cache[worktree.id] = worktree.status
+                }
+            } catch {
+                storeLog.error("list_worktrees failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+        }
+        guard !Task.isCancelled else { return }
+        board.loadPrCache(cache)
+    }
+
+    /// Debounced like the snapshot. Jean has no unread event: it is read again after events
+    /// that can change it (`chat:done`, `cache:invalidate`) and after each snapshot.
+    private func scheduleUnreadRefresh(after delay: Duration = .milliseconds(300)) {
+        unreadTask?.cancel()
+        unreadTask = Task { [weak self, client] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            let requestedAt = Date()
+            do {
+                let ids = try UnreadSessions.ids(from: await client.invoke(UnreadSessions.listCommand))
+                guard !Task.isCancelled, let self else { return }
+                self.board.loadUnread(ids, requestedAt: requestedAt)
+                self.syncQuestions()
+                storeLog.info("Unread: \(ids.count) sessions, \(self.board.visibleGroups.count) visible groups")
+            } catch {
+                storeLog.error("\(UnreadSessions.listCommand, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             }
         }
     }
@@ -173,11 +220,11 @@ public final class SessionStore {
     // MARK: Questions (experimental)
 
     /// Reads the last message of each session that can ask a question: one that waits on a
-    /// question, or one that finished (it can ask in its text). Drops the questions of the rest.
+    /// question, or an unread one that finished (it can ask in its text). Drops the questions of the rest.
     private func syncQuestions() {
         guard answersQuestions else { return }
         let candidates = board.sessions.values.filter {
-            ($0.status == .waiting(.question) || $0.status == .done) && !$0.worktreePath.isEmpty
+            ($0.status == .waiting(.question) || ($0.status == .done && $0.unread)) && !$0.worktreePath.isEmpty
         }
         let ids = Set(candidates.map(\.id))
         for id in questions.keys where !ids.contains(id) { questions[id] = nil }
@@ -353,12 +400,30 @@ public final class SessionStore {
         }
     }
 
-    public func markSeen(_ sessionId: String) { board.markSeen(sessionId) }
-    public func markAllSeen() { board.markAllSeen() }
+    /// Marks every unread session read, in the notch now and in Jean. Reads Jean's list first:
+    /// it can hold sessions the board does not show.
+    public func markAllRead() {
+        let shown = board.unreadIds
+        board.markRead(shown)
+        syncQuestions()
+        Task { [weak self, client] in
+            do {
+                let ids = try shown.union(UnreadSessions.ids(from: await client.invoke(UnreadSessions.listCommand)))
+                _ = try await client.invoke(UnreadSessions.markReadCommand, args: UnreadSessions.markReadArgs(ids))
+                storeLog.info("Marked \(ids.count) sessions read")
+            } catch {
+                storeLog.error("\(UnreadSessions.markReadCommand, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+            self?.scheduleUnreadRefresh(after: .zero)
+        }
+    }
 
-    /// Asks Jean to make `session` its active session. Best effort: Jean stores the
-    /// choice but its window may not switch to it yet.
+    /// Asks Jean to make `session` its active session, which also marks it read. Best effort:
+    /// Jean stores the choice but its window may not switch to it yet.
     public func selectInJean(_ session: SessionState) async {
+        board.markRead([session.id])
+        syncQuestions()
+        defer { scheduleUnreadRefresh(after: .zero) }
         do {
             _ = try await client.invoke("set_active_session", args: [
                 "worktreeId": session.worktreeId,
