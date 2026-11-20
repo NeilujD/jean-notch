@@ -32,6 +32,7 @@ private let ref = SessionRef(sessionId: "s1", worktreeId: "w1")
     #expect(try parse(#"{"type":"event","event":"ws:resync","payload":{}}"#) == .event(.resync))
     #expect(try parse(#"{"type":"event","event":"session-renamed","payload":{"session_id":"s1"}}"#) == .event(.structureChanged))
     #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["sessions"]}}"#) == .event(.structureChanged))
+    #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["unread-sessions"]}}"#) == .event(.unreadChanged))
     #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["preferences"]}}"#) == .event(nil))
 }
 
