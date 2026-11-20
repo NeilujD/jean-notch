@@ -32,6 +32,10 @@ public final class SessionStore {
     public private(set) var answering: Set<String> = []
     /// Why Jean refused the last answer to an open question, by question id.
     public private(set) var answerErrors: [String: String] = [:]
+    /// Experimental. Ids of the sessions whose stop request is on its way to Jean.
+    public private(set) var stopping: Set<String> = []
+    /// Why the last stop of a running session failed, by session id.
+    public private(set) var stopErrors: [String: String] = [:]
     /// Called when a session moves into waiting, done, or failed.
     @ObservationIgnored public var onAlert: ((SessionState) -> Void)?
 
@@ -81,6 +85,7 @@ public final class SessionStore {
             }
             switch jeanEvent {
             case .done(let ref, _), .failed(let ref), .cancelled(let ref):
+                stopErrors[ref.sessionId] = nil
                 loadTokens(ref.sessionId)
                 scheduleUsageRefresh(after: .seconds(2))
                 scheduleUnreadRefresh()
@@ -371,6 +376,30 @@ public final class SessionStore {
         return SendContext(mcpConfig: config, chromeEnabled: chrome, sessionResponse: sessionResponse)
     }
 
+    // MARK: Stop (experimental)
+
+    /// Asks Jean to cancel the session's run. Jean then sends `chat:cancelled`, which updates the row.
+    public func stop(_ session: SessionState) {
+        guard session.status == .running, !stopping.contains(session.id) else { return }
+        stopping.insert(session.id)
+        stopErrors[session.id] = nil
+        storeLog.info("Stopping \(session.id, privacy: .public)")
+        Task { [weak self, client] in
+            var failure: String?
+            do {
+                let raw = try await client.invoke("cancel_chat_message", args: session.cancelArgs)
+                // False: Jean found no run to cancel.
+                if try !ServerMessage.decodeData(Bool.self, from: raw) { failure = "Not stopped: Jean found no run." }
+            } catch {
+                storeLog.error("cancel_chat_message failed: \(String(describing: error), privacy: .public)")
+                failure = "Not stopped: \(error)"
+            }
+            guard let self else { return }
+            self.stopping.remove(session.id)
+            self.stopErrors[session.id] = failure
+        }
+    }
+
     /// Marks every unread session read, in the notch now and in Jean. Reads Jean's list first:
     /// it can hold sessions the board does not show.
     public func markAllRead() {
@@ -404,5 +433,12 @@ public final class SessionStore {
         } catch {
             storeLog.error("set_active_session failed: \(String(describing: error), privacy: .public)")
         }
+    }
+}
+
+extension SessionState {
+    /// Arguments of Jean's `cancel_chat_message` command.
+    var cancelArgs: [String: any Sendable] {
+        ["sessionId": id, "worktreeId": worktreeId]
     }
 }
