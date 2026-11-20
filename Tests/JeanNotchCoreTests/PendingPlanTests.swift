@@ -39,6 +39,17 @@ private let session = SessionState(
     #expect(file.text == "Here is the plan.")
     #expect(file.filePath == "/u/.claude/plans/a.md")
 
+    // Claude wrote the plan file, and Jean added an empty `ExitPlanMode` call.
+    let written = #"""
+    [{"id":"m1","role":"assistant","content":"Plan ready.","tool_calls":[
+        {"id":"t1","name":"Write","input":{"file_path":"/u/.claude/plans/c.md","content":"# C"}},
+        {"id":"t2","name":"Write","input":{"file_path":"/repo/notes.md","content":"x"}},
+        {"id":"t3","name":"ExitPlanMode","input":{}}]}]
+    """#
+    let edited = try #require(try detail(messages: written).pendingPlan)
+    #expect(edited.filePath == "/u/.claude/plans/c.md")
+    #expect(edited.text == "Plan ready.")
+
     let session = #","plan_file_path":"/u/.claude/plans/b.md""#
     #expect(try detail(messages: planning(), session: session).pendingPlan?.filePath == "/u/.claude/plans/b.md")
 

@@ -82,7 +82,10 @@ public struct PlanDetail: Decodable, Sendable {
         let role: String
         let content: String
         let planApproved: Bool
-        let planCall: PlanCall?
+        /// The last `ExitPlanMode` or `CodexPlan` call.
+        let planCall: ToolCall?
+        /// The last plan file that a `Write`, `Edit` or `MultiEdit` call changed.
+        let editedPlanFile: String?
 
         enum CodingKeys: String, CodingKey { case planApproved, toolCalls }
 
@@ -94,27 +97,34 @@ public struct PlanDetail: Decodable, Sendable {
             role = message.role
             content = message.content
             planApproved = (try? c.decodeIfPresent(Bool.self, forKey: .planApproved)) ?? false
-            let calls = (try? c.decodeIfPresent([Lenient<PlanCall>].self, forKey: .toolCalls)) ?? []
-            planCall = calls.compactMap(\.value).last
+            let calls = (try? c.decodeIfPresent([ToolCall].self, forKey: .toolCalls)) ?? []
+            planCall = calls.last { $0.name == "ExitPlanMode" || $0.name == "CodexPlan" }
+            editedPlanFile = calls.last {
+                ["Write", "Edit", "MultiEdit"].contains($0.name) && $0.filePath.map(Self.isPlanFile) == true
+            }?.filePath
+        }
+
+        /// `…/.claude/plans/<name>.md`, the files that `read_plan_file` reads (`isPlanFilePath` in Jean).
+        static func isPlanFile(_ path: String) -> Bool {
+            path.contains("/.claude/plans/") && path.lowercased().hasSuffix(".md")
         }
     }
 
-    /// A plan tool call. Decoding fails for other tools.
-    struct PlanCall: Decodable {
+    /// The tool input fields a plan can be in. The snake-case decoder reads
+    /// `plan_preview`, `plan_file_path` and `file_path` as camelCase.
+    struct ToolCall: Decodable {
+        let name: String
         let plan: String?
         let planPreview: String?
         let planFilePath: String?
+        let filePath: String?
 
         enum CodingKeys: String, CodingKey { case name, input }
-        enum InputKeys: String, CodingKey { case plan, planPreview, planFilePath }
+        enum InputKeys: String, CodingKey { case plan, planPreview, planFilePath, filePath }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            let name = try c.decode(String.self, forKey: .name)
-            guard name == "ExitPlanMode" || name == "CodexPlan" else {
-                throw DecodingError.dataCorruptedError(forKey: .name, in: c, debugDescription: "Not a plan tool")
-            }
-            // `plan_preview` and `plan_file_path` arrive in camelCase from the snake-case decoder.
+            name = (try? c.decode(String.self, forKey: .name)) ?? ""
             let input = try? c.nestedContainer(keyedBy: InputKeys.self, forKey: .input)
             func text(_ key: InputKeys) -> String? {
                 (try? input?.decodeIfPresent(String.self, forKey: key))?
@@ -123,12 +133,8 @@ public struct PlanDetail: Decodable, Sendable {
             plan = text(.plan)
             planPreview = text(.planPreview)
             planFilePath = text(.planFilePath)
+            filePath = text(.filePath)
         }
-    }
-
-    private struct Lenient<T: Decodable>: Decodable {
-        let value: T?
-        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
     }
 
     enum CodingKeys: String, CodingKey { case messages, approvedPlanMessageIds, planFilePath, waitingForInputType }
@@ -150,7 +156,7 @@ public struct PlanDetail: Decodable, Sendable {
               last.planCall != nil || waitingForInputType == "plan"
         else { return nil }
         let text = last.planCall?.plan ?? last.planCall?.planPreview ?? last.content
-        let filePath = planFilePath ?? last.planCall?.planFilePath
+        let filePath = planFilePath ?? last.planCall?.planFilePath ?? last.editedPlanFile
         guard !text.isEmpty || filePath != nil else { return nil }
         return PendingPlan(messageId: last.id, text: text, filePath: filePath)
     }
