@@ -207,6 +207,13 @@ struct NotchView: View {
                                 failure: store.answerErrors[question.id]
                             ) { store.answer(question, in: session, with: $0) }
                         }
+                        if let request = store.permissions[session.id]?.first {
+                            PermissionCard(
+                                request: request, panel: panel,
+                                sending: store.answeringPermissions.contains(request.rpcId),
+                                failure: store.permissionErrors[request.rpcId]
+                            ) { store.answerPermission(request, in: session, approved: $0) }
+                        }
                     }
                 }
             }

@@ -25,6 +25,8 @@ public enum JeanEvent: Equatable, Sendable {
     case cancelled(SessionRef)
     /// Claude ended the run with denied tools; the user must approve and resend.
     case permissionDenied(SessionRef)
+    /// A Claude Supervised run waits mid-run for the user to allow or deny these tool uses.
+    case permissionRequest(SessionRef, [PermissionRequest])
     /// Codex/OpenCode/Devin ask mid-run; the run resumes once answered.
     case approvalRequest(SessionRef, WaitKind)
     case toolUse(SessionRef, name: String)
@@ -54,7 +56,9 @@ public enum JeanEvent: Equatable, Sendable {
         case "chat:done": return .done(ref, waitingForPlan: payload?.waitingForPlan ?? false)
         case "chat:error": return .failed(ref)
         case "chat:cancelled": return .cancelled(ref)
-        case "chat:permission_denied": return .permissionDenied(ref)
+        case "chat:permission_denied":
+            let live = payload?.denials?.compactMap(\.request) ?? []
+            return live.isEmpty ? .permissionDenied(ref) : .permissionRequest(ref, live)
         case "chat:codex_user_input_request", "chat:codex_mcp_elicitation_request":
             return .approvalRequest(ref, .question)
         case "chat:codex_permission_request", "chat:opencode_permission_request",
@@ -76,6 +80,7 @@ struct EventPayload: Decodable {
     let waitingForPlan: Bool?
     let name: String?
     let keys: [String]?
+    let denials: [Denial]?
     let prNumber: Int?
     let state: String?
     let reviewDecision: String?
@@ -96,8 +101,38 @@ struct EventPayload: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id", worktreeId = "worktree_id"
-        case waitingForPlan = "waiting_for_plan", name, keys
+        case waitingForPlan = "waiting_for_plan", name, keys, denials
         case prNumber = "pr_number", state, reviewDecision = "review_decision", checkStatus = "check_status"
+    }
+
+    /// `PermissionDenial` in Jean's chat/types.rs. Only a live request has an `rpc_id`.
+    struct Denial: Decodable {
+        let toolName: String?
+        let toolUseId: String?
+        let toolInput: JSONValue?
+        let rpcId: UInt64?
+
+        enum CodingKeys: String, CodingKey {
+            case toolName = "tool_name", toolUseId = "tool_use_id", toolInput = "tool_input", rpcId = "rpc_id"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            toolName = try? c.decodeIfPresent(String.self, forKey: .toolName)
+            toolUseId = try? c.decodeIfPresent(String.self, forKey: .toolUseId)
+            toolInput = try? c.decodeIfPresent(JSONValue.self, forKey: .toolInput)
+            rpcId = try? c.decodeIfPresent(UInt64.self, forKey: .rpcId)
+        }
+
+        var request: PermissionRequest? {
+            guard let rpcId else { return nil }
+            return PermissionRequest(
+                rpcId: rpcId,
+                toolName: toolName ?? "a tool",
+                toolUseId: toolUseId ?? "",
+                input: toolInput?.displayText ?? ""
+            )
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -111,6 +146,59 @@ struct EventPayload: Decodable {
         state = try? c.decodeIfPresent(String.self, forKey: .state)
         reviewDecision = try? c.decodeIfPresent(String.self, forKey: .reviewDecision)
         checkStatus = try? c.decodeIfPresent(String.self, forKey: .checkStatus)
+        denials = try? c.decodeIfPresent([Denial].self, forKey: .denials)
+    }
+}
+
+/// A Claude tool use that waits for the user's answer (Supervised mode).
+public struct PermissionRequest: Equatable, Sendable {
+    /// Jean's id for the answer channel; `respond_claude_permission` needs it.
+    public let rpcId: UInt64
+    public let toolName: String
+    public let toolUseId: String
+    /// The tool input as text: the command of a shell tool, else one `key: value` line per field.
+    public let input: String
+
+    /// Arguments of `respond_claude_permission` (jean-core/src/http_server/dispatch.rs).
+    public func answerArgs(sessionId: String, approved: Bool) -> [String: any Sendable] {
+        ["sessionId": sessionId, "rpcId": rpcId, "approved": approved]
+    }
+}
+
+/// Any JSON value, to show a tool input that has no fixed shape.
+indirect enum JSONValue: Decodable, Equatable, Sendable {
+    case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let value = try? c.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? c.decode(Double.self) { self = .number(value) }
+        else if let value = try? c.decode(String.self) { self = .string(value) }
+        else if let value = try? c.decode([JSONValue].self) { self = .array(value) }
+        else { self = .object(try c.decode([String: JSONValue].self)) }
+    }
+
+    /// The `command` of a shell tool when the other fields only describe it, else one
+    /// `key: value` line per field, sorted by key. An approval prompt never hides a field that acts.
+    var displayText: String {
+        guard case .object(let fields) = self else { return inline }
+        if case .string(let command)? = fields["command"],
+           Set(fields.keys).isSubset(of: ["command", "description", "timeout"]) {
+            return command
+        }
+        return fields.keys.sorted().map { "\($0): \(fields[$0]!.inline)" }.joined(separator: "\n")
+    }
+
+    private var inline: String {
+        switch self {
+        case .null: "null"
+        case .bool(let value): "\(value)"
+        case .number(let value): value.rounded() == value && abs(value) < 1e15 ? "\(Int(value))" : "\(value)"
+        case .string(let value): value
+        case .array(let values): "[" + values.map(\.inline).joined(separator: ", ") + "]"
+        case .object(let fields): "{" + fields.keys.sorted().map { "\($0): \(fields[$0]!.inline)" }.joined(separator: ", ") + "}"
+        }
     }
 }
 

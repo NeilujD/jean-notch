@@ -32,6 +32,18 @@ public final class SessionStore {
     public private(set) var answering: Set<String> = []
     /// Why Jean refused the last answer to an open question, by question id.
     public private(set) var answerErrors: [String: String] = [:]
+    /// Experimental. While true, the store keeps the live Claude permission requests to answer them.
+    public var answersPermissions = false {
+        didSet {
+            if !answersPermissions { permissions = [:] }
+        }
+    }
+    /// Live Claude permission requests by session id, oldest first. Empty while `answersPermissions` is false.
+    public private(set) var permissions: [String: [PermissionRequest]] = [:]
+    /// Rpc ids of the permission requests whose answer is on its way to Jean.
+    public private(set) var answeringPermissions: Set<UInt64> = []
+    /// Why Jean refused the answer to a permission request, by rpc id. The request goes away soon after.
+    public private(set) var permissionErrors: [UInt64: String] = [:]
     /// Experimental. Ids of the sessions whose stop request is on its way to Jean.
     public private(set) var stopping: Set<String> = []
     /// Why the last stop of a running session failed, by session id.
@@ -96,6 +108,7 @@ public final class SessionStore {
             default:
                 break
             }
+            trackPermissions(jeanEvent)
             // The run that just ended can end with a question, so read its last message (again).
             if case .done(let ref, _) = jeanEvent {
                 questionTasks.removeValue(forKey: ref.sessionId)?.cancel()
@@ -374,6 +387,53 @@ public final class SessionStore {
         let chrome = preferences.chromeEnabled ?? false
         storeLog.info("Send context for \(session.id, privacy: .public): \(count) MCP servers (\(backend, privacy: .public)), chrome \(chrome)")
         return SendContext(mcpConfig: config, chromeEnabled: chrome, sessionResponse: sessionResponse)
+    }
+
+    // MARK: Permission requests (experimental)
+
+    /// A new request opens a card. Any other event of the run means the requests were answered
+    /// (maybe in Jean's window, which sends no event for it) or the run ended.
+    private func trackPermissions(_ event: JeanEvent) {
+        switch event {
+        case .permissionRequest(let ref, let requests) where answersPermissions:
+            let rpcIds = Set(requests.map(\.rpcId))
+            permissions[ref.sessionId] = (permissions[ref.sessionId] ?? []).filter { !rpcIds.contains($0.rpcId) } + requests
+        case .sending(let ref), .done(let ref, _), .failed(let ref), .cancelled(let ref), .toolUse(let ref, _):
+            permissions[ref.sessionId] = nil
+        default:
+            break
+        }
+    }
+
+    /// Answers one live request. Jean has no "always allow" for it. On error (the run already
+    /// stopped, or Jean's window answered first) the card shows the error, then goes away.
+    public func answerPermission(_ request: PermissionRequest, in session: SessionState, approved: Bool) {
+        guard permissions[session.id]?.contains(request) == true,
+              !answeringPermissions.contains(request.rpcId)
+        else { return }
+        answeringPermissions.insert(request.rpcId)
+        storeLog.info("Answering permission \(request.rpcId) in \(session.id, privacy: .public): \(approved ? "allow" : "deny", privacy: .public)")
+        Task { [weak self, client] in
+            var failure: String?
+            do {
+                _ = try await client.invoke("respond_claude_permission", args: request.answerArgs(sessionId: session.id, approved: approved))
+            } catch {
+                storeLog.error("respond_claude_permission failed: \(String(describing: error), privacy: .public)")
+                failure = "Not answered: \(error)"
+            }
+            guard let self else { return }
+            self.answeringPermissions.remove(request.rpcId)
+            if let failure {
+                self.permissionErrors[request.rpcId] = failure
+                try? await Task.sleep(for: .seconds(4))
+                self.permissionErrors[request.rpcId] = nil
+            }
+            self.permissions[session.id]?.removeAll { $0 == request }
+            if self.permissions[session.id]?.isEmpty == true {
+                self.permissions[session.id] = nil
+                if failure == nil { self.board.markResumed(session.id) }
+            }
+        }
     }
 
     // MARK: Stop (experimental)

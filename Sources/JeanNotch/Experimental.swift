@@ -6,6 +6,7 @@ import Foundation
 enum ExperimentalFeature: String, CaseIterable {
     case answerQuestions
     case stopSessions
+    case answerPermissions
 
     static let notice = "Experimental: can change or break"
 
@@ -15,6 +16,7 @@ enum ExperimentalFeature: String, CaseIterable {
         switch self {
         case .answerQuestions: "Answer Questions in the Notch"
         case .stopSessions: "Stop Sessions from the Notch"
+        case .answerPermissions: "Answer Permissions in the Notch"
         }
     }
 
