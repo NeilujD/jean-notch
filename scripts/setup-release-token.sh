@@ -202,6 +202,7 @@ run_wizard() {
 
 TOTAL_STAGES=4
 REPO="NeilujD/jean-notch"
+TAP_REPO="NeilujD/homebrew-tap"
 
 banner "jean-notch: RELEASE_TOKEN setup"
 
@@ -209,7 +210,8 @@ banner "jean-notch: RELEASE_TOKEN setup"
 stage "Check gh and the repo"
 say "The release workflow pushes the release/next branch and opens the release PR"
 say "with a token you own. GitHub does not run CI on PRs opened with GITHUB_TOKEN,"
-say "so this token is what lets CI run on the release PR."
+say "so this token is what lets CI run on the release PR. After each release, it"
+say "also pushes the new cask version to $TAP_REPO."
 if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
   warn "gh is missing or not logged in. Run 'gh auth login', then run this wizard again."
   exit 1
@@ -228,7 +230,7 @@ open_url "https://github.com/settings/personal-access-tokens/new"
 step "Token name: jean-notch RELEASE_TOKEN"
 step "Resource owner: NeilujD"
 step "Expiration: Custom → about 1 year from today (note the date for stage 4)"
-step "Repository access: Only select repositories → jean-notch"
+step "Repository access: Only select repositories → jean-notch and homebrew-tap"
 step "Permissions → Repository permissions:"
 say "      Contents: Read and write"
 say "      Pull requests: Read and write"
@@ -246,11 +248,12 @@ while true; do
     continue
   fi
   if GH_TOKEN="$RELEASE_TOKEN" gh api "repos/$REPO/pulls?per_page=1" >/dev/null 2>&1 \
-    && GH_TOKEN="$RELEASE_TOKEN" gh api "repos/$REPO/contents/README.md" >/dev/null 2>&1; then
-    say "Token can read $REPO contents and pull requests."
+    && GH_TOKEN="$RELEASE_TOKEN" gh api "repos/$REPO/contents/README.md" >/dev/null 2>&1 \
+    && GH_TOKEN="$RELEASE_TOKEN" gh api "repos/$TAP_REPO/contents/README.md" >/dev/null 2>&1; then
+    say "Token can read $REPO contents and pull requests, and $TAP_REPO contents."
     break
   fi
-  warn "The token cannot read $REPO. Check 'Only select repositories → jean-notch' and the permissions."
+  warn "The token cannot read $REPO or $TAP_REPO. Check 'Only select repositories → jean-notch and homebrew-tap' and the permissions."
   confirm "Paste another token?" || exit 1
 done
 note "Write access cannot be checked without writing; the first release PR run proves it."
