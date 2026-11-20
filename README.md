@@ -196,9 +196,25 @@ Accessibility › Display), the J stays still, confetti is off, and the notch on
 
 ## Install
 
-Download `JeanNotch-vX.Y.Z.zip` from the [latest release](https://github.com/NeilujD/jean-notch/releases/latest),
-unzip it and move `JeanNotch.app` to Applications. The app is ad-hoc signed, not notarized, so
-remove the quarantine flag once:
+The app is ad-hoc signed, not notarized. Each install option below handles Gatekeeper in its own way.
+
+**Homebrew** (recommended; `brew upgrade` gets new versions):
+
+```sh
+brew trust --cask neilujd/tap/jean-notch   # Homebrew loads casks from other taps only once trusted
+brew install --cask neilujd/tap/jean-notch
+```
+
+The cask is in [NeilujD/homebrew-tap](https://github.com/NeilujD/homebrew-tap). It removes the
+quarantine flag after install, so macOS opens the app without a Gatekeeper prompt.
+
+**Installer package:** download `JeanNotch-vX.Y.Z.pkg` from the
+[latest release](https://github.com/NeilujD/jean-notch/releases/latest) and open it. macOS blocks
+the unsigned package the first time: open System Settings → Privacy & Security, click
+**Open Anyway**, then follow the installer. It installs `JeanNotch.app` in Applications.
+
+**Zip:** download `JeanNotch-vX.Y.Z.zip` from the same release, unzip it, move `JeanNotch.app` to
+Applications and remove the quarantine flag once:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/JeanNotch.app
@@ -276,10 +292,12 @@ Releases are automated (`.github/workflows/release.yml`, `scripts/release.py`):
 3. PRs are **squash merged**. After each merge to `main`, a bot updates the release PR
    `chore(release): vX.Y.Z` (branch `release/next`): next version, build number in
    `scripts/bundle.sh`, and the full notes. Write an optional intro between its highlights markers.
-4. **Merging the release PR** builds `JeanNotch-vX.Y.Z.zip`, tags the commit and publishes the
-   GitHub Release. The notes copy this README's **Known limits** section.
+4. **Merging the release PR** builds `JeanNotch-vX.Y.Z.zip` and `.pkg` (`scripts/package.sh`), tags the commit and publishes the
+   GitHub Release. The notes copy this README's **Known limits** section. Then it fills
+   `packaging/jean-notch.rb` with the version and zip SHA-256 and pushes it to
+   [NeilujD/homebrew-tap](https://github.com/NeilujD/homebrew-tap). Edit the cask here, not in the tap.
 
-Setup: a fine-grained token (this repo only; Contents and Pull requests: read and write) in the
+Setup: a fine-grained token (this repo and `homebrew-tap` only; Contents and Pull requests: read and write) in the
 `RELEASE_TOKEN` secret, so CI runs on the release PR. Run `scripts/setup-release-token.sh`: it
 walks you through creating the token, checks it and saves the secret. Run it again to renew the
 token before it expires.

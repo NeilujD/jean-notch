@@ -44,7 +44,7 @@ jobs:
       - name: Build app
         run: |
           scripts/bundle.sh
-          ditto -c -k --keepParent build/JeanNotch.app "JeanNotch-$TAG.zip"
+          scripts/package.sh "$TAG"
         env:
           TAG: ${{ steps.notes.outputs.tag }}
       - name: Tag and publish
@@ -53,11 +53,29 @@ jobs:
             git tag "$TAG" "$GITHUB_SHA"
             git push origin "$TAG"
           fi
+          assets=("build/JeanNotch-$TAG.zip" "build/JeanNotch-$TAG.pkg")
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file notes.md
-            gh release upload "$TAG" "JeanNotch-$TAG.zip" --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" "JeanNotch-$TAG.zip" --title "JeanNotch $TAG" --notes-file notes.md --verify-tag
+            gh release create "$TAG" "${assets[@]}" --title "JeanNotch $TAG" --notes-file notes.md --verify-tag
           fi
         env:
           TAG: ${{ steps.notes.outputs.tag }}
+      # RELEASE_TOKEN must also cover NeilujD/homebrew-tap (scripts/setup-release-token.sh).
+      - name: Update Homebrew cask
+        run: |
+          sha=$(shasum -a 256 "build/JeanNotch-$TAG.zip" | cut -d' ' -f1)
+          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/NeilujD/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          sed -e "s/@VERSION@/${TAG#v}/" -e "s/@SHA256@/$sha/" packaging/jean-notch.rb > tap/Casks/jean-notch.rb
+          cd tap
+          git add Casks/jean-notch.rb
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "jean-notch ${TAG#v}"
+            git push
+          fi
+        env:
+          TAG: ${{ steps.notes.outputs.tag }}
+          TAP_TOKEN: ${{ secrets.RELEASE_TOKEN }}
