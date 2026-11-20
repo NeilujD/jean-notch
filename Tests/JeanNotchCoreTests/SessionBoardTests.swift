@@ -27,18 +27,20 @@ private func board(_ ids: String...) throws -> SessionBoard {
         ("r", #","last_run_status":"running""#),
         ("x", #","last_run_status":"crashed""#),
         ("p", #","pending_permission_denials":[{"tool_name":"Bash"}]"#),
-        ("i", #","last_run_status":"completed""#),
+        ("d", #","last_run_status":"completed""#),
+        ("i", #","last_run_status":"cancelled""#),
         ("a", #","archived_at":1"#),
     ]), requestedAt: t0)
     #expect(board.sessions["q"]?.status == .waiting(.question))
     #expect(board.sessions["r"]?.status == .running)
     #expect(board.sessions["x"]?.status == .failed)
     #expect(board.sessions["p"]?.status == .waiting(.permission))
+    #expect(board.sessions["d"]?.status == .done)
     #expect(board.sessions["i"]?.status == .idle)
     #expect(board.sessions["a"] == nil)
 }
 
-@Test func runThenDoneAlertsAndStaysUnseenUntilSeen() throws {
+@Test func runThenDoneAlertsAndStaysUnreadUntilRead() throws {
     var board = try board("s")
     #expect(board.apply(.sending(ref("s")), now: t0).alert == nil)
     #expect(board.sessions["s"]?.status == .running)
@@ -46,11 +48,11 @@ private func board(_ ids: String...) throws -> SessionBoard {
 
     let result = board.apply(.done(ref("s"), waitingForPlan: false), now: t0)
     #expect(result.alert?.status == .done)
-    #expect(board.sessions["s"]?.unseen == true)
+    #expect(board.sessions["s"]?.unread == true)
     #expect(board.mostUrgent == .done)
     #expect(board.visibleGroups.count == 1)
 
-    board.markSeen("s")
+    board.markRead(["s"])
     #expect(board.mostUrgent == nil)
     #expect(board.visibleGroups.isEmpty)
 }
@@ -132,7 +134,7 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.visibleGroups.map(\.worktreeId) == ["w2", "w1"])
 }
 
-@Test func snapshotKeepsUnseenResultAndNewerLiveState() throws {
+@Test func snapshotKeepsUnreadFlagAndNewerLiveState() throws {
     var board = try board("done", "live")
     _ = board.apply(.sending(ref("done")), now: t0)
     _ = board.apply(.done(ref("done"), waitingForPlan: false), now: t0)
@@ -142,7 +144,7 @@ private func board(_ ids: String...) throws -> SessionBoard {
 
     board.load(try snapshot([("done", #","last_run_status":"completed""#), ("live", "")]), requestedAt: requestedAt)
     #expect(board.sessions["done"]?.status == .done)
-    #expect(board.sessions["done"]?.unseen == true)
+    #expect(board.sessions["done"]?.unread == true)
     #expect(board.sessions["live"]?.status == .running)
 }
 
@@ -150,7 +152,7 @@ private func board(_ ids: String...) throws -> SessionBoard {
     var board = try board("s")
     _ = board.apply(.sending(ref("s")), now: t0)
     board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(60))
-    #expect(board.sessions["s"]?.status == .idle)
+    #expect(board.sessions["s"]?.status == .done)
     #expect(board.runningCount == 0)
 }
 
@@ -162,15 +164,13 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.sessions["s"]?.status == .waiting(.question))
     #expect(board.mostUrgent == .waiting)
 
-    board.markSeen("s")
     board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(60))
     #expect(board.sessions["s"]?.status == .waiting(.question))
 
     _ = board.apply(.sending(ref("s")), now: t0.addingTimeInterval(61))
     _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0.addingTimeInterval(62))
-    board.markSeen("s")
     board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(120))
-    #expect(board.sessions["s"]?.status == .idle)
+    #expect(board.sessions["s"]?.status == .done)
 }
 
 @Test func clearAskingEndsOnlyATextQuestionWait() throws {
@@ -183,6 +183,85 @@ private func board(_ ids: String...) throws -> SessionBoard {
 
     for id in ["text", "tool"] { board.clearAsking(id) }
     #expect(board.sessions["text"]?.status == .done)
-    #expect(board.sessions["text"]?.unseen == true)
+    #expect(board.sessions["text"]?.unread == true)
     #expect(board.sessions["tool"]?.status == .waiting(.question))
+}
+
+// MARK: Unread from Jean
+
+private func unreadResponse(_ ids: String...) -> Data {
+    let sessions = ids.map { #"{"id":"\#($0)","name":"\#($0)","last_run_status":"completed","last_opened_at":0}"# }
+    let json = #"""
+    {"type":"response","id":"1","data":{"entries":[{"project_id":"p","project_name":"proj","worktree_id":"w1","worktree_name":"main","worktree_path":"/tmp/p","sessions":[\#(sessions.joined(separator: ","))]}]}}
+    """#
+    return Data(json.utf8)
+}
+
+@Test func showsTheFinishedSessionsJeanCountsUnread() throws {
+    var board = SessionBoard()
+    board.load(try snapshot([
+        ("new", #","last_run_status":"completed""#),
+        ("old", #","last_run_status":"completed""#),
+        ("fail", #","last_run_status":"crashed""#),
+        ("ask", #","waiting_for_input":true"#),
+    ]), requestedAt: t0)
+    #expect(board.visibleGroups.isEmpty)
+
+    let ids = try UnreadSessions.ids(from: unreadResponse("new", "fail", "ask"))
+    board.loadUnread(ids, requestedAt: t0.addingTimeInterval(1))
+    #expect(board.visibleGroups.first?.sessions.map(\.id) == ["ask", "fail", "new"])
+    #expect(board.mostUrgent == .waiting)
+    #expect(board.unreadIds == ["new", "fail", "ask"])
+}
+
+@Test func sessionOpenedInJeanLeavesTheNotch() throws {
+    var board = try board("s")
+    _ = board.apply(.sending(ref("s")), now: t0)
+    _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0)
+    // The refetch after `chat:done`: Jean has it unread.
+    board.loadUnread(["s"], requestedAt: t0.addingTimeInterval(1))
+    #expect(board.visibleGroups.count == 1)
+
+    // The user opened it in Jean.
+    board.loadUnread([], requestedAt: t0.addingTimeInterval(30))
+    #expect(board.visibleGroups.isEmpty)
+    #expect(board.mostUrgent == nil)
+}
+
+@Test func unreadRefetchThatRacedARunEndKeepsTheNewResult() throws {
+    var board = try board("s")
+    _ = board.apply(.sending(ref("s")), now: t0)
+    let requestedAt = t0.addingTimeInterval(10)
+    _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0.addingTimeInterval(11))
+    board.loadUnread([], requestedAt: requestedAt)
+    #expect(board.sessions["s"]?.unread == true)
+}
+
+@Test func markAllReadClearsEveryRow() throws {
+    var board = try board("a", "b", "c")
+    board.loadUnread(["a", "b"], requestedAt: t0.addingTimeInterval(1))
+    _ = board.apply(.failed(ref("c")), now: t0.addingTimeInterval(2))
+    #expect(board.unreadIds == ["a", "b", "c"])
+
+    board.markRead(board.unreadIds)
+    #expect(board.unreadIds.isEmpty)
+    #expect(board.visibleGroups.isEmpty)
+    #expect(board.mostUrgent == nil)
+}
+
+@Test func markReadArgsMatchJeansCommand() {
+    let args = UnreadSessions.markReadArgs(["b", "a"])
+    #expect(UnreadSessions.markReadCommand == "set_sessions_last_opened_bulk")
+    #expect(Array(args.keys) == ["sessionIds"])
+    #expect(args["sessionIds"] as? [String] == ["a", "b"])
+}
+
+@Test func runEndAlertsEvenAfterAStaleSnapshotShowedItDone() throws {
+    var board = try board("s")
+    _ = board.apply(.sending(ref("s")), now: t0)
+    // Jean had not saved the new run yet.
+    board.load(try snapshot([("s", #","last_run_status":"completed""#)]), requestedAt: t0.addingTimeInterval(1))
+    #expect(board.sessions["s"]?.status == .done)
+    #expect(board.apply(.done(ref("s"), waitingForPlan: false), now: t0.addingTimeInterval(2)).alert?.status == .done)
+    #expect(board.sessions["s"]?.unread == true)
 }
