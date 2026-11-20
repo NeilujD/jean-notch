@@ -93,13 +93,35 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   - JeanNotch finds a question asked as text when a run ends. It does not find one that was
     asked before JeanNotch started. The alert for such a run is still the "done" sound and
     confetti.
-  - Plan approvals, permission requests, and Codex or OpenCode question tools have no card yet.
+  - Permission requests and Codex or OpenCode question tools have no card yet.
   - While this is on, JeanNotch reads the last run of each session that ends a run
     (`get_session`). When you click **Send**, it also reads the project and preference
     lists and the MCP servers (`list_projects`, `load_preferences`, `get_mcp_servers`), and
     for an `AskUserQuestion` card it saves the answer (`update_session_state`).
     While it is off, JeanNotch sends no message to a session.
   - `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns it on
+    (restart JeanNotch after).
+
+- **Approve Plans in the Notch.** When a session waits for you to approve its plan, the row
+  says "Plan" and the expanded notch shows the plan in a card below it. Scroll the plan, then
+  click **Approve**. The session starts to implement the plan in build mode (auto-accept
+  edits), as when you click **Approve** in Jean.
+
+  - JeanNotch does what Jean's own **Approve** button does: Jean marks the plan approved, sets
+    the session to build mode, and sends the same message ("Plan approved. Begin implementing
+    the changes now…", or Jean's Codex message). Jean's build model, thinking and effort
+    settings apply as in Jean. MCP servers and the Chrome switch are sent as for a question.
+  - **Approve (Full access)** and plan edits stay in Jean: click the session row to open it.
+  - The card shows the plan file (`~/.claude/plans/…`) when the session has one, else the plan
+    in the last message. It goes away when the plan is approved, in the notch or in Jean, or
+    when a new run starts.
+  - One click approves. The card is below the session row, out of the way of the pointer when
+    the notch opens.
+  - While this is on, JeanNotch reads the last run of each session that waits on a plan
+    (`get_session`, `read_plan_file`). When you click **Approve**, it calls
+    `mark_plan_approved`, `update_session_state`, `broadcast_session_setting` and
+    `send_chat_message`, after it reads the same settings as for a question.
+  - `defaults write build.jean.notch experimental.approvePlans -bool true` also turns it on
     (restart JeanNotch after).
 
 ### The mascot

@@ -186,3 +186,23 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.sessions["text"]?.unseen == true)
     #expect(board.sessions["tool"]?.status == .waiting(.question))
 }
+
+@Test func planWaitComesFromTheSnapshotOrExitPlanModeAndEndsOnTheNextRun() throws {
+    var board = SessionBoard()
+    board.load(try snapshot([
+        ("snap", #","last_run_status":"completed","waiting_for_input":true,"waiting_for_input_type":"plan""#),
+        ("live", ""),
+    ]), requestedAt: t0)
+    #expect(board.sessions["snap"]?.status == .waiting(.plan))
+
+    _ = board.apply(.sending(ref("live")), now: t0)
+    #expect(board.apply(.toolUse(ref("live"), name: "ExitPlanMode"), now: t0).alert?.status == .waiting(.plan))
+    _ = board.apply(.done(ref("live"), waitingForPlan: false), now: t0)
+    #expect(board.sessions["live"]?.status == .waiting(.plan))
+
+    // Approved in Jean's window: the snapshot clears the wait, and the approval starts a run.
+    board.load(try snapshot([("snap", #","last_run_status":"completed""#), ("live", "")]), requestedAt: t0.addingTimeInterval(60))
+    #expect(board.sessions["snap"]?.status == .idle)
+    _ = board.apply(.sending(ref("live")), now: t0.addingTimeInterval(61))
+    #expect(board.sessions["live"]?.status == .running)
+}
