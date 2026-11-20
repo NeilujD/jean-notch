@@ -39,6 +39,11 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   limit is over 80%, the collapsed notch shows an orange ⚠. Change the limit in the menu
   (**Usage Warning**) or with `defaults write build.jean.notch usageWarning -int 90`
   (0 turns it off). Jean's other agents (OpenCode, Cursor, Pi, and so on) give no usage data.
+- **Dev servers:** when Jean runs dev servers (Run environments), a "▶ Dev" line above the
+  plan usage lists them, for example "web :5173 · api-gateway :8000". Each name is the
+  worktree (or the project, for a base session) and the port. Click one to open its URL in
+  your browser. The line lists the servers of all worktrees, also of worktrees whose sessions
+  are hidden. No line when no server runs.
 - **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning,
   Experimental, Quit.
 
@@ -179,6 +184,9 @@ The pixel "J" and its palette are a nod to Jean's logo.
 3. On connect and on `ws:resync`, it loads a snapshot with `list_all_sessions`. After that it
    follows live `chat:*` events. Structure events (`session-renamed`, `worktree:*`,
    `cache:invalidate`) trigger a debounced snapshot reload.
+   The dev servers come from `get_run_environments`, on connect and after each
+   `terminal:started` / `terminal:stopped` event, plus a second read 5 s after a start
+   (a server can open its port later).
 4. It reconnects with exponential backoff (1 s → 30 s) and drops a socket that is silent for 20 s.
 
 ## Known limits

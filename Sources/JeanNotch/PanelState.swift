@@ -13,6 +13,8 @@ final class PanelState {
     private(set) var celebration: Date?
     /// Picked options by question id. Kept here so they stay when the notch collapses.
     private(set) var picks: [String: PendingQuestion.Picks] = [:]
+    /// The footer dev server link under the pointer.
+    var hoveredDevServer: DevServer?
 
     var expanded: Bool { hovering || alerting }
 

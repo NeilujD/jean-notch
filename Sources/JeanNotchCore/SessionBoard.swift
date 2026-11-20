@@ -125,6 +125,8 @@ public struct SessionBoard: Equatable, Sendable {
         switch event {
         case .structureChanged, .resync:
             return ApplyResult(needsSnapshot: true)
+        case .terminalStarted, .terminalStopped:
+            return ApplyResult()
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
              .permissionDenied(let r), .approvalRequest(let r, _), .toolUse(let r, _):
             ref = r
@@ -173,7 +175,7 @@ public struct SessionBoard: Equatable, Sendable {
                 // A tool ran: any mid-run approval was answered.
                 state.status = .running
             }
-        case .structureChanged, .resync:
+        case .structureChanged, .resync, .terminalStarted, .terminalStopped:
             break
         }
 

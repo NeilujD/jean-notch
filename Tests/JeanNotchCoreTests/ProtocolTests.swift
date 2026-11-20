@@ -120,3 +120,41 @@ private func usage(_ json: String) throws -> ProviderUsage {
     #expect(ProviderUsage.timeLeft(until: 1_000_000 + 5 * 86_400 + 100, now: now) == "5d")
     #expect(ProviderUsage.timeLeft(until: 999_000, now: now) == "0m")
 }
+
+// MARK: - Run environments (dev servers)
+
+@Test func parsesTerminalEvents() throws {
+    #expect(try parse(#"{"type":"event","event":"terminal:started","payload":{"terminal_id":"t1","cols":80,"rows":24}}"#) == .event(.terminalStarted))
+    #expect(try parse(#"{"type":"event","event":"terminal:stopped","payload":{"terminal_id":"t1","exit_code":0,"signal":null}}"#) == .event(.terminalStopped))
+}
+
+@Test func decodesRunEnvironmentsIntoDevServers() throws {
+    let raw = Data(#"""
+    {"type":"response","id":"1","data":{"environments":[
+      {"running":true,"terminalId":"t1","worktreeId":"w1","worktreeName":"web","worktreePath":"/tmp/web",
+       "isBaseSession":false,"projectId":"p1","projectName":"shop","sessionId":"s1","command":"npm","commandArgs":["run","dev"],
+       "ports":[{"port":5173,"processName":"node","localAddress":"127.0.0.1","url":"http://localhost:5173","source":"lsof"}],
+       "url":"http://localhost:5173"},
+      {"running":true,"terminalId":"t2","worktreeId":"w2","worktreeName":"main","isBaseSession":true,"projectName":"api-gateway",
+       "ports":[{"port":8000},{"port":8001,"url":"https://127.0.0.1:8001"}],"url":"http://localhost:8000"},
+      {"running":false,"worktreeName":"old","ports":[{"port":3000,"url":"http://localhost:3000"}]}
+    ]}}
+    """#.utf8)
+    let response = try ServerMessage.decodeData(RunEnvironmentsResponse.self, from: raw)
+    #expect(response.environments.count == 3)
+    let servers = DevServer.list(from: response)
+    #expect(servers.map(\.label) == ["web :5173", "api-gateway :8000", "api-gateway :8001"])
+    #expect(servers.map(\.url.absoluteString) == ["http://localhost:5173", "http://localhost:8000", "https://127.0.0.1:8001"])
+}
+
+@Test func devServerWithoutPortsUsesEnvironmentURLAndSkipsNonWebURLs() throws {
+    let raw = Data(#"""
+    {"type":"response","id":"1","data":{"environments":[
+      {"running":true,"worktreeName":"docs","ports":[],"url":"http://localhost:4000"},
+      {"running":true,"worktreeName":"starting","ports":[],"url":null},
+      {"running":true,"worktreeName":"evil","ports":[{"port":1,"url":"file:///etc/passwd"}]}
+    ]}}
+    """#.utf8)
+    let servers = DevServer.list(from: try ServerMessage.decodeData(RunEnvironmentsResponse.self, from: raw))
+    #expect(servers.map(\.label) == ["docs :4000"])
+}

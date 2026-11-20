@@ -33,8 +33,16 @@ struct NotchView: View {
                 header
                 VStack(spacing: 10) {
                     list
-                    if store.connection == .online, !store.usage.isEmpty {
-                        UsageFooter(usage: store.usage, warning: usageWarning)
+                    if store.connection == .online, !store.usage.isEmpty || !store.devServers.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5)
+                            if !store.devServers.isEmpty {
+                                DevServersLine(servers: store.devServers, panel: panel)
+                            }
+                            if !store.usage.isEmpty {
+                                UsageFooter(usage: store.usage, warning: usageWarning)
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 14).padding(.bottom, 12)
@@ -373,7 +381,6 @@ private struct UsageFooter: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 3) {
-                Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5)
                 ForEach(UsageProvider.allCases.filter { usage[$0] != nil }, id: \.self) { provider in
                     HStack(spacing: 10) {
                         Text(provider.name).font(.system(size: 10, weight: .medium))
@@ -390,6 +397,65 @@ private struct UsageFooter: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
         }
+    }
+}
+
+/// "▶ Dev  web :5173 · api :8000". A click opens the server's URL in the browser.
+private struct DevServersLine: View {
+    let servers: [DevServer]
+    let panel: PanelState
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("Dev", systemImage: "play.fill").labelStyle(DevLabelStyle())
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 40, alignment: .leading)
+            HStack(spacing: 4) {
+                ForEach(Array(servers.enumerated()), id: \.element) { index, server in
+                    if index > 0 { Text("·").opacity(0.7) }
+                    DevServerLink(server: server, panel: panel)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 10).monospacedDigit())
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+    }
+}
+
+private struct DevLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon.font(.system(size: 7))
+            configuration.title
+        }
+    }
+}
+
+private struct DevServerLink: View {
+    let server: DevServer
+    let panel: PanelState
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button { openURL(server.url) } label: {
+            Text(server.label)
+                .underline(pattern: .dot)
+                .foregroundStyle(panel.hoveredDevServer == server ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            if inside {
+                panel.hoveredDevServer = server
+            } else if panel.hoveredDevServer == server {
+                panel.hoveredDevServer = nil
+            }
+        }
+        .help(server.url.absoluteString)
+        .accessibilityLabel("Open \(server.label)")
     }
 }
 

@@ -30,10 +30,15 @@ public enum JeanEvent: Equatable, Sendable {
     case toolUse(SessionRef, name: String)
     case structureChanged
     case resync
+    /// A run environment (dev server) started or stopped. The payload names no worktree.
+    case terminalStarted
+    case terminalStopped
 
     static func make(name: String, payload: EventPayload?) -> JeanEvent? {
         switch name {
         case "ws:resync": return .resync
+        case "terminal:started": return .terminalStarted
+        case "terminal:stopped": return .terminalStopped
         case "session-renamed", "worktree:created", "worktree:deleted":
             return .structureChanged
         case "cache:invalidate":
