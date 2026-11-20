@@ -19,6 +19,8 @@ public final class SessionStore {
     public private(set) var tokens: [String: TokenUsage] = [:]
     /// Plan limits of the providers that answered (a provider you are not logged in to errors).
     public private(set) var usage: [UsageProvider: ProviderUsage] = [:]
+    /// Ports of the run environments (dev servers) that run in Jean, in all worktrees.
+    public private(set) var devServers: [DevServer] = []
     /// Experimental. While true, the store reads the last message of each session that
     /// finished a run or waits on a question, to find the question it asks.
     public var answersQuestions = false {
@@ -69,6 +71,8 @@ public final class SessionStore {
     @ObservationIgnored private var unreadTask: Task<Void, Never>?
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var usageTask: Task<Void, Never>?
+    @ObservationIgnored private var devServerTask: Task<Void, Never>?
+    @ObservationIgnored private var devServerRecheckTask: Task<Void, Never>?
     /// One entry per session whose question was requested, so each is requested once.
     @ObservationIgnored private var questionTasks: [String: Task<Void, Never>] = [:]
     /// One entry per session whose plan was requested, so each is requested once.
@@ -97,9 +101,13 @@ public final class SessionStore {
             forgetPlanRequests()
             scheduleRefresh(after: .zero)
             scheduleUsageRefresh(after: .zero)
+            scheduleDevServerRefresh(after: .zero)
         case .disconnected(let reason):
             connection = .offline(reason)
             usageTask?.cancel()
+            devServerTask?.cancel()
+            devServerRecheckTask?.cancel()
+            devServers = []
         case .event(let jeanEvent):
             let result = board.apply(jeanEvent, now: Date())
             storeLog.debug("Event \(String(describing: jeanEvent), privacy: .public)")
@@ -120,6 +128,17 @@ public final class SessionStore {
                 scheduleUnreadRefresh()
             case .sending(let ref) where tokens[ref.sessionId] == nil:
                 loadTokens(ref.sessionId)
+            case .terminalStarted:
+                scheduleDevServerRefresh(after: .milliseconds(500))
+                // The server can open its port seconds after the start, with no event.
+                devServerRecheckTask?.cancel()
+                devServerRecheckTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { return }
+                    self?.scheduleDevServerRefresh(after: .zero)
+                }
+            case .terminalStopped:
+                scheduleDevServerRefresh(after: .milliseconds(500))
             default:
                 break
             }
@@ -245,6 +264,24 @@ public final class SessionStore {
             guard !Task.isCancelled, let self else { return }
             self.usage = next
             self.scheduleUsageRefresh(after: .seconds(300))
+        }
+    }
+
+    /// Debounced: a burst of terminal events triggers one fetch.
+    private func scheduleDevServerRefresh(after delay: Duration) {
+        devServerTask?.cancel()
+        devServerTask = Task { [weak self, client] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            do {
+                let raw = try await client.invoke("get_run_environments")
+                let servers = DevServer.list(from: try ServerMessage.decodeData(RunEnvironmentsResponse.self, from: raw))
+                guard !Task.isCancelled, let self else { return }
+                if self.devServers != servers { self.devServers = servers }
+                storeLog.debug("Dev servers: \(servers.count)")
+            } catch {
+                storeLog.error("get_run_environments failed: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 

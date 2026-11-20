@@ -135,7 +135,7 @@ public struct SessionBoard: Equatable, Sendable {
             // No alert: a PR change never expands the notch or plays a sound.
             prBadges[status.worktreeId] = PrBadge(status)
             return ApplyResult()
-        case .unreadChanged:
+        case .unreadChanged, .terminalStarted, .terminalStopped:
             return ApplyResult()
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
              .permissionDenied(let r), .permissionRequest(let r, _), .approvalRequest(let r, _), .toolUse(let r, _):
@@ -188,7 +188,7 @@ public struct SessionBoard: Equatable, Sendable {
                 // A tool ran: any mid-run approval was answered.
                 state.status = .running
             }
-        case .structureChanged, .unreadChanged, .resync, .prStatus:
+        case .structureChanged, .unreadChanged, .resync, .prStatus, .terminalStarted, .terminalStopped:
             break
         }
 
