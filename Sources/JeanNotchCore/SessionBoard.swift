@@ -126,7 +126,7 @@ public struct SessionBoard: Equatable, Sendable {
         case .structureChanged, .resync:
             return ApplyResult(needsSnapshot: true)
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
-             .permissionDenied(let r), .approvalRequest(let r, _), .toolUse(let r, _):
+             .permissionDenied(let r), .permissionRequest(let r, _), .approvalRequest(let r, _), .toolUse(let r, _):
             ref = r
         }
 
@@ -165,6 +165,9 @@ public struct SessionBoard: Equatable, Sendable {
             state.pendingWait = .permission
         case .approvalRequest(_, let kind):
             state.status = .waiting(kind)
+        case .permissionRequest:
+            // Mid-run, unlike `permissionDenied`: the run continues once answered.
+            state.status = .waiting(.permission)
         case .toolUse(_, let name):
             if let blocking = Self.blockingTools[name] {
                 state.status = .waiting(blocking)
@@ -222,6 +225,16 @@ public struct SessionBoard: Equatable, Sendable {
         guard sessions[sessionId]?.asksInText == true else { return }
         sessions[sessionId]?.status = .done
         sessions[sessionId]?.asksInText = false
+    }
+
+    // MARK: Permission answered
+
+    /// The user answered a live permission request: the run that waited on it goes on.
+    public mutating func markResumed(_ sessionId: String) {
+        guard sessions[sessionId]?.status == .waiting(.permission),
+              sessions[sessionId]?.pendingWait == nil
+        else { return }
+        sessions[sessionId]?.status = .running
     }
 
     // MARK: Seen

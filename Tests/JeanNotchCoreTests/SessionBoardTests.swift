@@ -186,3 +186,27 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.sessions["text"]?.unseen == true)
     #expect(board.sessions["tool"]?.status == .waiting(.question))
 }
+
+@Test func livePermissionRequestWaitsMidRunAndResumes() throws {
+    var board = try board("s")
+    _ = board.apply(.sending(ref("s")), now: t0)
+    let request = PermissionRequest(rpcId: 1, toolName: "Bash", toolUseId: "tu", input: "ls")
+    let result = board.apply(.permissionRequest(ref("s"), [request]), now: t0)
+    #expect(result.alert?.status == .waiting(.permission))
+    #expect(board.mostUrgent == .waiting)
+
+    board.markResumed("s")
+    #expect(board.sessions["s"]?.status == .running)
+
+    // Unlike an after-the-fact denial, the wait does not outlive the run.
+    _ = board.apply(.permissionRequest(ref("s"), [request]), now: t0)
+    _ = board.apply(.done(ref("s"), waitingForPlan: false), now: t0)
+    #expect(board.sessions["s"]?.status == .done)
+}
+
+@Test func resumeLeavesAfterTheFactDenialWaiting() throws {
+    var board = try board("s")
+    _ = board.apply(.permissionDenied(ref("s")), now: t0)
+    board.markResumed("s")
+    #expect(board.sessions["s"]?.status == .waiting(.permission))
+}

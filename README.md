@@ -93,13 +93,33 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   - JeanNotch finds a question asked as text when a run ends. It does not find one that was
     asked before JeanNotch started. The alert for such a run is still the "done" sound and
     confetti.
-  - Plan approvals, permission requests, and Codex or OpenCode question tools have no card yet.
+  - Plan approvals and Codex or OpenCode question tools have no card yet.
   - While this is on, JeanNotch reads the last run of each session that ends a run
     (`get_session`). When you click **Send**, it also reads the project and preference
     lists and the MCP servers (`list_projects`, `load_preferences`, `get_mcp_servers`), and
     for an `AskUserQuestion` card it saves the answer (`update_session_state`).
     While it is off, JeanNotch sends no message to a session.
   - `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns it on
+    (restart JeanNotch after).
+
+- **Answer Permissions in the Notch.** When a Claude session in Supervised mode asks to use a
+  tool, the session row shows "Approval" and a card shows below it: the tool name and its input
+  (the command for `Bash`; 3 lines, then it scrolls). Click **Deny** to deny at once. Click
+  **Allow**, then **Allow?**, to allow. The session then continues.
+
+  - Only Claude in Supervised mode asks during a run. A tool that Claude denies by itself
+    shows in Jean at the end of the run: that gets no card. Codex and OpenCode permission
+    requests have no card yet.
+  - There is no "always allow". To allow a tool for the next runs, open Jean.
+  - The card goes away when you answer, when the run continues or ends, or when you answer
+    in Jean's window. Jean sends no event for an answer in its window, so the card can stay
+    until the run's next tool or the end of the run. If you then click, Jean refuses the
+    answer: the card shows the error for a few seconds and goes away.
+  - JeanNotch sees only the requests that come while it runs. After a restart of JeanNotch,
+    answer an open request in Jean.
+  - While this is on, JeanNotch answers with `respond_claude_permission`. While it is off,
+    JeanNotch sends no answer.
+  - `defaults write build.jean.notch experimental.answerPermissions -bool true` also turns it on
     (restart JeanNotch after).
 
 ### The mascot

@@ -13,6 +13,8 @@ final class PanelState {
     private(set) var celebration: Date?
     /// Picked options by question id. Kept here so they stay when the notch collapses.
     private(set) var picks: [String: PendingQuestion.Picks] = [:]
+    /// Rpc id of the permission request whose **Allow** was clicked once.
+    var confirmingAllow: UInt64?
 
     var expanded: Bool { hovering || alerting }
 

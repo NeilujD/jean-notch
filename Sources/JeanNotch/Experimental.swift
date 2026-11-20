@@ -5,6 +5,7 @@ import Foundation
 /// `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns one on.
 enum ExperimentalFeature: String, CaseIterable {
     case answerQuestions
+    case answerPermissions
 
     static let notice = "Experimental: can change or break"
 
@@ -13,6 +14,7 @@ enum ExperimentalFeature: String, CaseIterable {
     var title: String {
         switch self {
         case .answerQuestions: "Answer Questions in the Notch"
+        case .answerPermissions: "Answer Permissions in the Notch"
         }
     }
 
