@@ -102,6 +102,17 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   - `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns it on
     (restart JeanNotch after).
 
+- **Stop Sessions from the Notch.** Put the pointer on a running session row: a ■ button
+  shows in place of the token count and time. Click it once: it changes to a red **Stop?**.
+  Click **Stop?** to stop the run.
+  - One click never stops a run, because the notch can open under your pointer. Move the
+    pointer off the row and **Stop?** changes back to ■.
+  - JeanNotch asks Jean to cancel the run (`cancel_chat_message`). The row then shows the
+    state that Jean sends: a stopped run is idle, so the row leaves the list.
+  - If Jean cannot stop the run, a short red error shows below the row, and the row stays.
+  - While this is off, JeanNotch shows no stop button and stops nothing.
+  - `defaults write build.jean.notch experimental.stopSessions -bool true` also turns it on.
+
 ### The mascot
 
 A flat pixel "J" sits next to the notch. It does not act out urgency (the dot does that):

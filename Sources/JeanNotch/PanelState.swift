@@ -13,6 +13,9 @@ final class PanelState {
     private(set) var celebration: Date?
     /// Picked options by question id. Kept here so they stay when the notch collapses.
     private(set) var picks: [String: PendingQuestion.Picks] = [:]
+    /// Experimental: the session row under the pointer, and whether its stop button asks "Stop?".
+    private(set) var hoveredRow: String?
+    private(set) var stopArmed = false
 
     var expanded: Bool { hovering || alerting }
 
@@ -54,6 +57,20 @@ final class PanelState {
             picked = picked == [option] ? [] : [option]
         }
         picks[id, default: [:]][question] = picked
+    }
+
+    /// Moving to another row, or out of it, turns "Stop?" back into the stop button.
+    func hoverRow(_ id: String, inside: Bool) {
+        guard inside || hoveredRow == id else { return }
+        hoveredRow = inside ? id : nil
+        stopArmed = false
+    }
+
+    /// The first click arms the stop button; the second returns true, so the run stops.
+    /// Two clicks, because the notch can open under the pointer.
+    func clickStop() -> Bool {
+        stopArmed.toggle()
+        return !stopArmed
     }
 
     func celebrate() {

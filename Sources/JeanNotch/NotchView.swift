@@ -14,6 +14,7 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(WarningLimit.tokens.key) private var tokenWarning = WarningLimit.tokens.defaultValue
     @AppStorage(WarningLimit.usage.key) private var usageWarning = WarningLimit.usage.defaultValue
+    @AppStorage(ExperimentalFeature.stopSessions.key) private var stopsSessions = false
 
     private let side: CGFloat = 44
     private let expandedWidth: CGFloat = 400
@@ -185,8 +186,15 @@ struct NotchView: View {
                         .lineLimit(1)
                     ForEach(group.sessions) { session in
                         SessionRow(
-                            session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now
-                        ) { actions.open(session) }
+                            session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now,
+                            panel: panel, action: { actions.open(session) },
+                            stop: stopsSessions && session.status == .running ? { store.stop(session) } : nil,
+                            stopping: store.stopping.contains(session.id)
+                        )
+                        if stopsSessions, session.status == .running, let failure = store.stopErrors[session.id] {
+                            Text(failure).font(.system(size: 9)).foregroundStyle(.red).lineLimit(2)
+                                .padding(.horizontal, 6)
+                        }
                         if let question = store.questions[session.id] {
                             QuestionCard(
                                 pending: question, panel: panel,
@@ -224,7 +232,15 @@ private struct SessionRow: View {
     let tokens: TokenUsage?
     let tokenLimit: Int
     let now: Date
+    let panel: PanelState
     let action: () -> Void
+    /// Experimental. Nil when the row has no stop button.
+    var stop: (() -> Void)?
+    var stopping = false
+
+    private var hovering: Bool { panel.hoveredRow == session.id }
+    private var armed: Bool { hovering && panel.stopArmed }
+    private var showsStop: Bool { stop != nil && (hovering || stopping) }
 
     var body: some View {
         Button(action: action) {
@@ -232,12 +248,15 @@ private struct SessionRow: View {
                 StatusBadge(session: session)
                 Text(session.name).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
-                if let tokens, tokens.total > 0 {
-                    TokenCount(total: tokens.total, limit: tokenLimit)
+                HStack(spacing: 8) {
+                    if let tokens, tokens.total > 0 {
+                        TokenCount(total: tokens.total, limit: tokenLimit)
+                    }
+                    Text(Self.age(from: session.changedAt, to: now))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                Text(Self.age(from: session.changedAt, to: now))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                .opacity(showsStop ? 0 : 1)
             }
             .padding(.vertical, 3)
             .padding(.horizontal, 6)
@@ -245,6 +264,37 @@ private struct SessionRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+        .overlay(alignment: .trailing) {
+            if showsStop, let stop {
+                stopButton(stop).padding(.trailing, 4)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(showsStop ? 0.08 : 0)))
+        .onHover { panel.hoverRow(session.id, inside: $0) }
+    }
+
+    private func stopButton(_ stop: @escaping () -> Void) -> some View {
+        Button {
+            if panel.clickStop() { stop() }
+        } label: {
+            Group {
+                if stopping {
+                    Text("Stopping").padding(.horizontal, 8)
+                } else if armed {
+                    Text("Stop?").padding(.horizontal, 8)
+                } else {
+                    Image(systemName: "stop.fill").font(.system(size: 7)).frame(width: 18)
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .frame(height: 16)
+            .background(Capsule().fill(armed ? Urgency.failed.color : .white.opacity(0.15)))
+            .foregroundStyle(.white)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(stopping)
+        .accessibilityLabel(armed ? "Click again to stop the session" : "Stop the session")
     }
 
     static func age(from date: Date, to now: Date) -> String {
