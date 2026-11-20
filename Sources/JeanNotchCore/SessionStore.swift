@@ -120,12 +120,34 @@ public final class SessionStore {
                 }
                 self.syncQuestions()
                 self.scheduleUnreadRefresh(after: .zero)
+                await self.loadPrCache()
                 let total = snapshot.entries.reduce(0) { $0 + $1.sessions.count }
                 storeLog.info("Snapshot: \(snapshot.entries.count) worktrees, \(total) sessions, \(self.board.visibleGroups.count) visible groups, \(self.board.runningCount) running")
             } catch {
                 storeLog.error("Snapshot failed: \(String(describing: error), privacy: .public)")
             }
         }
+    }
+
+    /// Reads the PR state Jean saved on the worktrees of every project with sessions: a worktree
+    /// can become visible later (unread list, new run) without a new snapshot.
+    /// Jean checks PRs only while its window is focused, so this is the state at its last check.
+    private func loadPrCache() async {
+        let projectIds = Set(board.sessions.values.map(\.projectId)).subtracting([""])
+        var cache: [String: PrStatus] = [:]
+        for projectId in projectIds {
+            do {
+                let raw = try await client.invoke("list_worktrees", args: ["projectId": projectId])
+                for worktree in try ServerMessage.decodeData([CachedWorktreePr].self, from: raw) {
+                    cache[worktree.id] = worktree.status
+                }
+            } catch {
+                storeLog.error("list_worktrees failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+        }
+        guard !Task.isCancelled else { return }
+        board.loadPrCache(cache)
     }
 
     /// Debounced like the snapshot. Jean has no unread event: it is read again after events

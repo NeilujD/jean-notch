@@ -58,6 +58,11 @@ public enum Urgency: Equatable, Sendable {
 /// Pure session-status reducer. No I/O, so tests drive it directly.
 public struct SessionBoard: Equatable, Sendable {
     public private(set) var sessions: [String: SessionState] = [:]
+    /// Badge of each worktree's PR, by worktree id: from Jean's cached PR state, or from a
+    /// later `pr:status-update`, which wins until the cached state changes.
+    public private(set) var prBadges: [String: PrBadge] = [:]
+    /// The cached PR state each badge was last seeded from.
+    private var prCache: [String: PrStatus] = [:]
 
     public init() {}
 
@@ -126,6 +131,10 @@ public struct SessionBoard: Equatable, Sendable {
         switch event {
         case .structureChanged, .resync:
             return ApplyResult(needsSnapshot: true)
+        case .prStatus(let status):
+            // No alert: a PR change never expands the notch or plays a sound.
+            prBadges[status.worktreeId] = PrBadge(status)
+            return ApplyResult()
         case .unreadChanged:
             return ApplyResult()
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
@@ -176,7 +185,7 @@ public struct SessionBoard: Equatable, Sendable {
                 // A tool ran: any mid-run approval was answered.
                 state.status = .running
             }
-        case .structureChanged, .unreadChanged, .resync:
+        case .structureChanged, .unreadChanged, .resync, .prStatus:
             break
         }
 
@@ -211,6 +220,15 @@ public struct SessionBoard: Equatable, Sendable {
             status: .idle,
             changedAt: now
         )
+    }
+
+    /// Seeds badges from Jean's cached PR states (`list_worktrees`), by worktree id.
+    /// Only a changed entry replaces a badge, so a live event stays until Jean saves a newer state.
+    public mutating func loadPrCache(_ cache: [String: PrStatus]) {
+        for id in Set(cache.keys).union(prCache.keys) where cache[id] != prCache[id] {
+            prBadges[id] = cache[id].flatMap(PrBadge.init)
+        }
+        prCache = cache
     }
 
     // MARK: Questions asked as text

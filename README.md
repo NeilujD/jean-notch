@@ -24,6 +24,13 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   project › worktree, sorted waiting → failed → running → done. The notch shows the same
   unread sessions as Jean: a waiting, failed, or done session stays until you open it in Jean
   or click its row. Running sessions always show; idle and read sessions are hidden.
+- **PR badge:** a worktree with a pull request shows one badge after its name:
+  ✕ CI failing (red), ● Changes requested (orange), ◌ CI running (gray), ✓ Ready (green),
+  or ⇡ Merged (purple), with the PR number. A closed PR or no PR shows no badge. The badge
+  shows the last PR state Jean knows. Jean checks PRs only while its window is in front:
+  every 5 minutes, and faster for the open worktree. "Changes requested" shows only after
+  such a check while JeanNotch runs (Jean does not save the review state). A badge change
+  plays no sound and does not expand the notch.
 - **Tokens:** each row shows the session's total tokens, for example "3.2M"
   (k = thousand, M = million). The total counts input, output, and cache reads and
   writes, summed over all runs. Jean saves a run's usage when the run ends, so the count

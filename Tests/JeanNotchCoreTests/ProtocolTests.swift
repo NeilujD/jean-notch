@@ -121,3 +121,18 @@ private func usage(_ json: String) throws -> ProviderUsage {
     #expect(ProviderUsage.timeLeft(until: 1_000_000 + 5 * 86_400 + 100, now: now) == "5d")
     #expect(ProviderUsage.timeLeft(until: 999_000, now: now) == "0m")
 }
+
+@Test func parsesPrStatusUpdate() throws {
+    let message = try parse(#"{"type":"event","event":"pr:status-update","payload":{"worktree_id":"w1","pr_number":12,"pr_url":"https://github.com/o/r/pull/12","base_branch":"main","state":"open","is_draft":false,"review_decision":null,"check_status":"failure","display_status":"open","mergeable":"mergeable","checked_at":1795000000}}"#)
+    #expect(message == .event(.prStatus(PrStatus(worktreeId: "w1", number: 12, state: "open", reviewDecision: nil, checkStatus: "failure"))))
+    #expect(try parse(#"{"type":"event","event":"pr:status-update","payload":{"state":"open"}}"#) == .event(nil))
+}
+
+@Test func decodesCachedPrStateFromListWorktrees() throws {
+    let raw = Data(#"{"type":"response","id":"1","data":[{"id":"w1","name":"main","path":"/x","pr_number":5,"pr_url":"https://github.com/o/r/pull/5","cached_pr_status":"review","cached_check_status":"pending"},{"id":"w2","name":"b","path":"/y"}]}"#.utf8)
+    let worktrees = try ServerMessage.decodeData([CachedWorktreePr].self, from: raw)
+    #expect(worktrees == [
+        CachedWorktreePr(id: "w1", prNumber: 5, cachedPrStatus: "review", cachedCheckStatus: "pending"),
+        CachedWorktreePr(id: "w2", prNumber: nil, cachedPrStatus: nil, cachedCheckStatus: nil),
+    ])
+}
