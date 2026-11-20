@@ -29,6 +29,8 @@ public enum JeanEvent: Equatable, Sendable {
     case approvalRequest(SessionRef, WaitKind)
     case toolUse(SessionRef, name: String)
     case structureChanged
+    /// Jean's unread sessions may have changed (a session was opened or marked read).
+    case unreadChanged
     case resync
 
     static func make(name: String, payload: EventPayload?) -> JeanEvent? {
@@ -38,7 +40,8 @@ public enum JeanEvent: Equatable, Sendable {
             return .structureChanged
         case "cache:invalidate":
             let keys = Set(payload?.keys ?? [])
-            return keys.isDisjoint(with: ["sessions", "projects"]) ? nil : .structureChanged
+            if !keys.isDisjoint(with: ["sessions", "projects"]) { return .structureChanged }
+            return keys.contains("unread-sessions") ? .unreadChanged : nil
         default: break
         }
         guard let ref = payload?.ref else { return nil }
@@ -190,6 +193,24 @@ public struct AllSessionsResponse: Decodable, Equatable, Sendable {
     /// Matches any JSON value; used only to count array elements.
     struct Opaque: Decodable {
         init(from decoder: Decoder) throws {}
+    }
+}
+
+// MARK: - Unread sessions
+
+/// Jean's unread sessions: `list_unread_sessions` answers in the `list_all_sessions` shape.
+public enum UnreadSessions {
+    public static let listCommand = "list_unread_sessions"
+    public static let markReadCommand = "set_sessions_last_opened_bulk"
+
+    public static func ids(from raw: Data) throws -> Set<String> {
+        let response = try ServerMessage.decodeData(AllSessionsResponse.self, from: raw)
+        return Set(response.entries.flatMap { $0.sessions.map(\.id) })
+    }
+
+    /// Jean stamps each session as opened now, so it leaves Jean's unread list.
+    public static func markReadArgs(_ ids: Set<String>) -> [String: any Sendable] {
+        ["sessionIds": ids.sorted()]
     }
 }
 
