@@ -22,6 +22,11 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
   project › worktree, sorted waiting → failed → running → done. Idle and seen sessions are hidden.
+- **PR badge:** a worktree with a pull request shows one badge after its name:
+  ✕ CI failing (red), ● Changes requested (orange), ◌ CI running (gray), ✓ Ready (green),
+  or ⇡ Merged (purple), with the PR number. A closed PR or no PR shows no badge. Jean checks
+  each PR every 5 minutes and JeanNotch only listens, so a badge appears at Jean's next check
+  after JeanNotch starts. A badge change plays no sound and does not expand the notch.
 - **Tokens:** each row shows the session's total tokens, for example "3.2M"
   (k = thousand, M = million). The total counts input, output, and cache reads and
   writes, summed over all runs. Jean saves a run's usage when the run ends, so the count

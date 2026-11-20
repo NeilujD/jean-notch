@@ -179,10 +179,15 @@ struct NotchView: View {
         return VStack(alignment: .leading, spacing: 8) {
             ForEach(shown) { group in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(group.projectName) › \(group.worktreeName)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text("\(group.projectName) › \(group.worktreeName)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if let badge = store.board.prBadges[group.worktreeId] {
+                            PrBadgeView(badge: badge)
+                        }
+                    }
                     ForEach(group.sessions) { session in
                         SessionRow(
                             session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now
@@ -469,6 +474,41 @@ private struct StatusBadge: View {
         case .done: Urgency.done.color
         case .running: .blue
         case .idle: .gray
+        }
+    }
+}
+
+private struct PrBadgeView: View {
+    let badge: PrBadge
+
+    var body: some View {
+        Text("\(symbol) \(badge.label)")
+            .font(.system(size: 9, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.15)))
+            .accessibilityLabel("Pull request: \(badge.label)")
+    }
+
+    private var symbol: String {
+        switch badge.kind {
+        case .ciFailing: "✕"
+        case .changesRequested: "●"
+        case .ciRunning: "◌"
+        case .ready: "✓"
+        case .merged: "⇡"
+        }
+    }
+
+    private var color: Color {
+        switch badge.kind {
+        case .ciFailing: .red
+        case .changesRequested: .orange
+        case .ciRunning: .gray
+        case .ready: .green
+        case .merged: .purple
         }
     }
 }

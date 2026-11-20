@@ -186,3 +186,33 @@ private func board(_ ids: String...) throws -> SessionBoard {
     #expect(board.sessions["text"]?.unseen == true)
     #expect(board.sessions["tool"]?.status == .waiting(.question))
 }
+
+private func pr(_ state: String, check: String? = nil, review: String? = nil) -> PrStatus {
+    PrStatus(worktreeId: "w1", number: 12, state: state, reviewDecision: review, checkStatus: check)
+}
+
+@Test func mapsEachPrStateToOneBadge() {
+    #expect(PrBadge(pr("merged", check: "failure"))?.kind == .merged)
+    #expect(PrBadge(pr("open", check: "failure", review: "changes_requested"))?.kind == .ciFailing)
+    #expect(PrBadge(pr("open", check: "error"))?.kind == .ciFailing)
+    #expect(PrBadge(pr("open", check: "pending", review: "changes_requested"))?.kind == .changesRequested)
+    #expect(PrBadge(pr("open", check: "pending"))?.kind == .ciRunning)
+    #expect(PrBadge(pr("open", check: "success", review: "approved"))?.kind == .ready)
+    #expect(PrBadge(pr("open"))?.kind == .ready)
+    #expect(PrBadge(pr("closed", check: "failure")) == nil)
+    #expect(PrBadge(pr("open", check: "failure"))?.label == "CI failing · #12")
+    #expect(PrBadge(pr("merged"))?.label == "Merged")
+}
+
+@Test func prStatusUpdateReplacesTheWorktreeBadgeWithoutAlert() throws {
+    var board = try board("a")
+    let before = board.sessions
+    let first = board.apply(.prStatus(pr("open", check: "pending")), now: t0)
+    #expect(first == SessionBoard.ApplyResult())
+    #expect(board.prBadges["w1"]?.kind == .ciRunning)
+    _ = board.apply(.prStatus(pr("open", check: "success")), now: t0)
+    #expect(board.prBadges["w1"]?.kind == .ready)
+    _ = board.apply(.prStatus(pr("closed")), now: t0)
+    #expect(board.prBadges["w1"] == nil)
+    #expect(board.sessions == before)
+}

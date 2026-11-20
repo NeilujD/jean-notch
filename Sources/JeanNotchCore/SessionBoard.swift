@@ -58,6 +58,8 @@ public enum Urgency: Equatable, Sendable {
 /// Pure session-status reducer. No I/O, so tests drive it directly.
 public struct SessionBoard: Equatable, Sendable {
     public private(set) var sessions: [String: SessionState] = [:]
+    /// Badge of each worktree's PR from its last `pr:status-update`, by worktree id.
+    public private(set) var prBadges: [String: PrBadge] = [:]
 
     public init() {}
 
@@ -125,6 +127,10 @@ public struct SessionBoard: Equatable, Sendable {
         switch event {
         case .structureChanged, .resync:
             return ApplyResult(needsSnapshot: true)
+        case .prStatus(let status):
+            // No alert: a PR change never expands the notch or plays a sound.
+            prBadges[status.worktreeId] = PrBadge(status)
+            return ApplyResult()
         case .sending(let r), .done(let r, _), .failed(let r), .cancelled(let r),
              .permissionDenied(let r), .approvalRequest(let r, _), .toolUse(let r, _):
             ref = r
@@ -173,7 +179,7 @@ public struct SessionBoard: Equatable, Sendable {
                 // A tool ran: any mid-run approval was answered.
                 state.status = .running
             }
-        case .structureChanged, .resync:
+        case .structureChanged, .resync, .prStatus:
             break
         }
 
