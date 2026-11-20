@@ -48,7 +48,7 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
 > any release. Turn one on in the menu (**Experimental**).
 
 <p align="center">
-  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked item 'Answer Questions in the Notch'">
+  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked items 'Answer Questions in the Notch' and 'Answer Permissions in the Notch'">
 </p>
 
 - **Answer Questions in the Notch.** When a session ends its turn with a question, the
