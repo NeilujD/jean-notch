@@ -115,12 +115,33 @@ public final class SessionStore {
                     }
                 }
                 self.syncQuestions()
+                await self.loadPrCache()
                 let total = snapshot.entries.reduce(0) { $0 + $1.sessions.count }
                 storeLog.info("Snapshot: \(snapshot.entries.count) worktrees, \(total) sessions, \(self.board.visibleGroups.count) visible groups, \(self.board.runningCount) running")
             } catch {
                 storeLog.error("Snapshot failed: \(String(describing: error), privacy: .public)")
             }
         }
+    }
+
+    /// Reads the PR state Jean saved on the worktrees of the projects the notch shows.
+    /// Jean checks PRs only while its window is focused, so this is the state at its last check.
+    private func loadPrCache() async {
+        let projectIds = Set(board.visibleGroups.compactMap { $0.sessions.first?.projectId }).subtracting([""])
+        var cache: [String: PrStatus] = [:]
+        for projectId in projectIds {
+            do {
+                let raw = try await client.invoke("list_worktrees", args: ["projectId": projectId])
+                for worktree in try ServerMessage.decodeData([CachedWorktreePr].self, from: raw) {
+                    cache[worktree.id] = worktree.status
+                }
+            } catch {
+                storeLog.error("list_worktrees failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+        }
+        guard !Task.isCancelled else { return }
+        board.loadPrCache(cache)
     }
 
     /// Jean saves a run's usage before it sends `chat:done`, so a fetch then sees the new total.

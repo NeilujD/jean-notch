@@ -216,3 +216,31 @@ private func pr(_ state: String, check: String? = nil, review: String? = nil) ->
     #expect(board.prBadges["w1"] == nil)
     #expect(board.sessions == before)
 }
+
+private func cached(_ display: String?, check: String? = nil, number: Int? = 12) -> PrStatus? {
+    CachedWorktreePr(id: "w1", prNumber: number, cachedPrStatus: display, cachedCheckStatus: check).status
+}
+
+@Test func mapsJeansCachedPrStateToABadge() {
+    #expect(cached("merged", check: "failure").flatMap(PrBadge.init)?.kind == .merged)
+    #expect(cached("review", check: "error").flatMap(PrBadge.init)?.kind == .ciFailing)
+    #expect(cached("open", check: "pending").flatMap(PrBadge.init)?.kind == .ciRunning)
+    #expect(cached("draft", check: "success").flatMap(PrBadge.init)?.kind == .ready)
+    #expect(cached("review").flatMap(PrBadge.init)?.kind == .ready)
+    #expect(cached("closed", check: "failure").flatMap(PrBadge.init) == nil)
+    #expect(cached(nil) == nil)
+    #expect(cached("open", number: nil) == nil)
+}
+
+@Test func liveEventWinsOverTheCacheUntilTheCacheChanges() throws {
+    var board = try board("a")
+    board.loadPrCache(["w1": cached("open", check: "success")!])
+    #expect(board.prBadges["w1"]?.kind == .ready)
+    _ = board.apply(.prStatus(pr("open", check: "success", review: "changes_requested")), now: t0)
+    board.loadPrCache(["w1": cached("open", check: "success")!])
+    #expect(board.prBadges["w1"]?.kind == .changesRequested)
+    board.loadPrCache(["w1": cached("open", check: "failure")!])
+    #expect(board.prBadges["w1"]?.kind == .ciFailing)
+    board.loadPrCache([:])
+    #expect(board.prBadges["w1"] == nil)
+}

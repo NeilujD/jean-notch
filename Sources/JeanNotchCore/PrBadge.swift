@@ -20,6 +20,35 @@ public struct PrStatus: Equatable, Sendable {
     }
 }
 
+/// The PR state Jean saved on a worktree (`list_worktrees`). Jean writes it at each PR check,
+/// so JeanNotch can show a badge at start, before any `pr:status-update`.
+public struct CachedWorktreePr: Decodable, Equatable, Sendable {
+    public let id: String
+    public let prNumber: Int?
+    /// draft, open, review, merged, closed.
+    public let cachedPrStatus: String?
+    /// success, failure, pending, error.
+    public let cachedCheckStatus: String?
+
+    public init(id: String, prNumber: Int?, cachedPrStatus: String?, cachedCheckStatus: String?) {
+        self.id = id
+        self.prNumber = prNumber
+        self.cachedPrStatus = cachedPrStatus
+        self.cachedCheckStatus = cachedCheckStatus
+    }
+
+    /// Nil when the worktree has no PR or Jean has not checked it yet.
+    /// The cache has no review decision, so it never gives "Changes requested".
+    public var status: PrStatus? {
+        guard prNumber != nil, let display = cachedPrStatus else { return nil }
+        let state = switch display {
+        case "merged", "closed": display
+        default: "open"
+        }
+        return PrStatus(worktreeId: id, number: prNumber, state: state, reviewDecision: nil, checkStatus: cachedCheckStatus)
+    }
+}
+
 /// One badge per worktree header: the state of its PR that matters most.
 public struct PrBadge: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {

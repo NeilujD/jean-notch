@@ -126,3 +126,12 @@ private func usage(_ json: String) throws -> ProviderUsage {
     #expect(message == .event(.prStatus(PrStatus(worktreeId: "w1", number: 12, state: "open", reviewDecision: nil, checkStatus: "failure"))))
     #expect(try parse(#"{"type":"event","event":"pr:status-update","payload":{"state":"open"}}"#) == .event(nil))
 }
+
+@Test func decodesCachedPrStateFromListWorktrees() throws {
+    let raw = Data(#"{"type":"response","id":"1","data":[{"id":"w1","name":"main","path":"/x","pr_number":5,"pr_url":"https://github.com/o/r/pull/5","cached_pr_status":"review","cached_check_status":"pending"},{"id":"w2","name":"b","path":"/y"}]}"#.utf8)
+    let worktrees = try ServerMessage.decodeData([CachedWorktreePr].self, from: raw)
+    #expect(worktrees == [
+        CachedWorktreePr(id: "w1", prNumber: 5, cachedPrStatus: "review", cachedCheckStatus: "pending"),
+        CachedWorktreePr(id: "w2", prNumber: nil, cachedPrStatus: nil, cachedCheckStatus: nil),
+    ])
+}

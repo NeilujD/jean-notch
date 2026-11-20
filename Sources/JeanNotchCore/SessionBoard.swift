@@ -58,8 +58,11 @@ public enum Urgency: Equatable, Sendable {
 /// Pure session-status reducer. No I/O, so tests drive it directly.
 public struct SessionBoard: Equatable, Sendable {
     public private(set) var sessions: [String: SessionState] = [:]
-    /// Badge of each worktree's PR from its last `pr:status-update`, by worktree id.
+    /// Badge of each worktree's PR, by worktree id: from Jean's cached PR state, or from a
+    /// later `pr:status-update`, which wins until the cached state changes.
     public private(set) var prBadges: [String: PrBadge] = [:]
+    /// The cached PR state each badge was last seeded from.
+    private var prCache: [String: PrStatus] = [:]
 
     public init() {}
 
@@ -211,6 +214,15 @@ public struct SessionBoard: Equatable, Sendable {
             status: .idle,
             changedAt: now
         )
+    }
+
+    /// Seeds badges from Jean's cached PR states (`list_worktrees`), by worktree id.
+    /// Only a changed entry replaces a badge, so a live event stays until Jean saves a newer state.
+    public mutating func loadPrCache(_ cache: [String: PrStatus]) {
+        for id in Set(cache.keys).union(prCache.keys) where cache[id] != prCache[id] {
+            prBadges[id] = cache[id].flatMap(PrBadge.init)
+        }
+        prCache = cache
     }
 
     // MARK: Questions asked as text
