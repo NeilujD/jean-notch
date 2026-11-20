@@ -186,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyExperimental() {
         store.answersQuestions = ExperimentalFeature.answerQuestions.isOn
         store.answersPermissions = ExperimentalFeature.answerPermissions.isOn
+        store.approvesPlans = ExperimentalFeature.approvePlans.isOn
     }
 
     @objc private func setWarning(_ sender: NSMenuItem) {

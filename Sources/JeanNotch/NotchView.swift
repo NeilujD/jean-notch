@@ -214,6 +214,12 @@ struct NotchView: View {
                                 failure: store.permissionErrors[request.rpcId]
                             ) { store.answerPermission(request, in: session, approved: $0) }
                         }
+                        if let plan = store.plans[session.id] {
+                            PlanCard(
+                                plan: plan, sending: store.approving.contains(session.id),
+                                failure: store.approveErrors[session.id]
+                            ) { store.approve(plan, in: session) }
+                        }
                     }
                 }
             }
@@ -387,6 +393,81 @@ private struct QuestionCard: View {
         }
         styled.link = nil
         return styled
+    }
+}
+
+/// Experimental: the plan a session waits on, in a scroll area, with one Approve button
+/// (build mode). Full access and plan edits stay in Jean.
+private struct PlanCard: View {
+    let plan: PendingPlan
+    let sending: Bool
+    let failure: String?
+    let approve: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(Self.lines(plan.text).enumerated()), id: \.offset) { _, line in
+                        line
+                    }
+                }
+                .padding(8)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
+            .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.05)))
+            HStack(spacing: 6) {
+                Text(failure ?? "Experimental · Full access and edits: open Jean")
+                    .font(.system(size: 9))
+                    .foregroundStyle(failure == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.red))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button(sending ? "Approving" : "Approve", action: approve)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Capsule().fill(sending ? .white.opacity(0.12) : Urgency.waiting.color))
+                    .foregroundStyle(sending ? AnyShapeStyle(.secondary) : AnyShapeStyle(.black))
+                    .disabled(sending)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07)))
+        .foregroundStyle(.white)
+        .padding(.bottom, 2)
+    }
+
+    /// Markdown blocks as lines: headings in bold, list items with a bullet, code fences dropped.
+    static func lines(_ markdown: String) -> [AnyView] {
+        markdown.components(separatedBy: "\n").compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("```") { return nil }
+            if let heading = line.firstMatch(of: /^#{1,6}\s+(.+)/) {
+                return AnyView(Text(QuestionCard.inlineMarkdown(String(heading.1)))
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.top, 2))
+            }
+            let indent = CGFloat(raw.prefix { $0 == " " }.count / 2) * 10
+            if let item = line.firstMatch(of: /^(?:[-*+]|\d+[.)])\s+(.+)/) {
+                let mark = line.first?.isNumber == true ? String(line.prefix { $0 != " " }) : "•"
+                return AnyView(HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(mark).foregroundStyle(.secondary)
+                    Text(QuestionCard.inlineMarkdown(String(item.1)))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 10))
+                .padding(.leading, indent))
+            }
+            return AnyView(Text(QuestionCard.inlineMarkdown(line))
+                .font(.system(size: 10))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, indent))
+        }
     }
 }
 
