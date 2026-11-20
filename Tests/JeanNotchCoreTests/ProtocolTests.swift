@@ -139,6 +139,12 @@ private func usage(_ json: String) throws -> ProviderUsage {
     #expect(requests.first?.input == "file_path: /a.txt\nold_string: x\nreplace_all: false")
 }
 
+@Test func showsEveryFieldWhenACommandHasFieldsThatAct() {
+    let input = JSONValue.object(["command": .string("ls"), "description": .string("List"), "cwd": .string("/etc")])
+    #expect(input.displayText == "command: ls\ncwd: /etc\ndescription: List")
+    #expect(JSONValue.object(["command": .string("ls"), "timeout": .number(5000)]).displayText == "ls")
+}
+
 @Test func buildsPermissionAnswerArgs() {
     let request = PermissionRequest(rpcId: 7, toolName: "Bash", toolUseId: "tu1", input: "ls")
     let args = request.answerArgs(sessionId: "s1", approved: true)

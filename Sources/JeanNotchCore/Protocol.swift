@@ -155,10 +155,14 @@ indirect enum JSONValue: Decodable, Equatable, Sendable {
         else { self = .object(try c.decode([String: JSONValue].self)) }
     }
 
-    /// A `command` field alone (Bash), else one `key: value` line per field, sorted by key.
+    /// The `command` of a shell tool when the other fields only describe it, else one
+    /// `key: value` line per field, sorted by key. An approval prompt never hides a field that acts.
     var displayText: String {
         guard case .object(let fields) = self else { return inline }
-        if case .string(let command)? = fields["command"] { return command }
+        if case .string(let command)? = fields["command"],
+           Set(fields.keys).isSubset(of: ["command", "description", "timeout"]) {
+            return command
+        }
         return fields.keys.sorted().map { "\($0): \(fields[$0]!.inline)" }.joined(separator: "\n")
     }
 
