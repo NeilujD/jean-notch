@@ -14,6 +14,7 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(WarningLimit.tokens.key) private var tokenWarning = WarningLimit.tokens.defaultValue
     @AppStorage(WarningLimit.usage.key) private var usageWarning = WarningLimit.usage.defaultValue
+    @AppStorage(ExperimentalFeature.stopSessions.key) private var stopsSessions = false
 
     private let side: CGFloat = 44
     private let expandedWidth: CGFloat = 400
@@ -187,20 +188,45 @@ struct NotchView: View {
         return VStack(alignment: .leading, spacing: 8) {
             ForEach(shown) { group in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(group.projectName) › \(group.worktreeName)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text("\(group.projectName) › \(group.worktreeName)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if let badge = store.board.prBadges[group.worktreeId] {
+                            PrBadgeView(badge: badge)
+                        }
+                    }
                     ForEach(group.sessions) { session in
                         SessionRow(
-                            session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now
-                        ) { actions.open(session) }
+                            session: session, tokens: store.tokens[session.id], tokenLimit: tokenWarning, now: now,
+                            panel: panel, action: { actions.open(session) },
+                            stop: stopsSessions && session.status == .running ? { store.stop(session) } : nil,
+                            stopping: store.stopping.contains(session.id)
+                        )
+                        if stopsSessions, session.status == .running, let failure = store.stopErrors[session.id] {
+                            Text(failure).font(.system(size: 9)).foregroundStyle(.red).lineLimit(2)
+                                .padding(.horizontal, 6)
+                        }
                         if let question = store.questions[session.id] {
                             QuestionCard(
                                 pending: question, panel: panel,
                                 sending: store.answering.contains(question.id),
                                 failure: store.answerErrors[question.id]
                             ) { store.answer(question, in: session, with: $0) }
+                        }
+                        if let request = store.permissions[session.id]?.first {
+                            PermissionCard(
+                                request: request, panel: panel,
+                                sending: store.answeringPermissions.contains(request.rpcId),
+                                failure: store.permissionErrors[request.rpcId]
+                            ) { store.answerPermission(request, in: session, approved: $0) }
+                        }
+                        if let plan = store.plans[session.id] {
+                            PlanCard(
+                                plan: plan, sending: store.approving.contains(session.id),
+                                failure: store.approveErrors[session.id]
+                            ) { store.approve(plan, in: session) }
                         }
                     }
                 }
@@ -232,7 +258,15 @@ private struct SessionRow: View {
     let tokens: TokenUsage?
     let tokenLimit: Int
     let now: Date
+    let panel: PanelState
     let action: () -> Void
+    /// Experimental. Nil when the row has no stop button.
+    var stop: (() -> Void)?
+    var stopping = false
+
+    private var hovering: Bool { panel.hoveredRow == session.id }
+    private var armed: Bool { hovering && panel.stopArmed }
+    private var showsStop: Bool { stop != nil && (hovering || stopping) }
 
     var body: some View {
         Button(action: action) {
@@ -240,12 +274,15 @@ private struct SessionRow: View {
                 StatusBadge(session: session)
                 Text(session.name).font(.system(size: 12)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
-                if let tokens, tokens.total > 0 {
-                    TokenCount(total: tokens.total, limit: tokenLimit)
+                HStack(spacing: 8) {
+                    if let tokens, tokens.total > 0 {
+                        TokenCount(total: tokens.total, limit: tokenLimit)
+                    }
+                    Text(Self.age(from: session.changedAt, to: now))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                Text(Self.age(from: session.changedAt, to: now))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                .opacity(showsStop ? 0 : 1)
             }
             .padding(.vertical, 3)
             .padding(.horizontal, 6)
@@ -253,6 +290,37 @@ private struct SessionRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
+        .overlay(alignment: .trailing) {
+            if showsStop, let stop {
+                stopButton(stop).padding(.trailing, 4)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(showsStop ? 0.08 : 0)))
+        .onHover { panel.hoverRow(session.id, inside: $0) }
+    }
+
+    private func stopButton(_ stop: @escaping () -> Void) -> some View {
+        Button {
+            if panel.clickStop() { stop() }
+        } label: {
+            Group {
+                if stopping {
+                    Text("Stopping").padding(.horizontal, 8)
+                } else if armed {
+                    Text("Stop?").padding(.horizontal, 8)
+                } else {
+                    Image(systemName: "stop.fill").font(.system(size: 7)).frame(width: 18)
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .frame(height: 16)
+            .background(Capsule().fill(armed ? Urgency.failed.color : .white.opacity(0.15)))
+            .foregroundStyle(.white)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(stopping)
+        .accessibilityLabel(armed ? "Click again to stop the session" : "Stop the session")
     }
 
     static func age(from date: Date, to now: Date) -> String {
@@ -333,6 +401,81 @@ private struct QuestionCard: View {
         }
         styled.link = nil
         return styled
+    }
+}
+
+/// Experimental: the plan a session waits on, in a scroll area, with one Approve button
+/// (build mode). Full access and plan edits stay in Jean.
+private struct PlanCard: View {
+    let plan: PendingPlan
+    let sending: Bool
+    let failure: String?
+    let approve: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(Self.lines(plan.text).enumerated()), id: \.offset) { _, line in
+                        line
+                    }
+                }
+                .padding(8)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
+            .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.05)))
+            HStack(spacing: 6) {
+                Text(failure ?? "Experimental · Full access and edits: open Jean")
+                    .font(.system(size: 9))
+                    .foregroundStyle(failure == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.red))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button(sending ? "Approving" : "Approve", action: approve)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(Capsule().fill(sending ? .white.opacity(0.12) : Urgency.waiting.color))
+                    .foregroundStyle(sending ? AnyShapeStyle(.secondary) : AnyShapeStyle(.black))
+                    .disabled(sending)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07)))
+        .foregroundStyle(.white)
+        .padding(.bottom, 2)
+    }
+
+    /// Markdown blocks as lines: headings in bold, list items with a bullet, code fences dropped.
+    static func lines(_ markdown: String) -> [AnyView] {
+        markdown.components(separatedBy: "\n").compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("```") { return nil }
+            if let heading = line.firstMatch(of: /^#{1,6}\s+(.+)/) {
+                return AnyView(Text(QuestionCard.inlineMarkdown(String(heading.1)))
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.top, 2))
+            }
+            let indent = CGFloat(raw.prefix { $0 == " " }.count / 2) * 10
+            if let item = line.firstMatch(of: /^(?:[-*+]|\d+[.)])\s+(.+)/) {
+                let mark = line.first?.isNumber == true ? String(line.prefix { $0 != " " }) : "•"
+                return AnyView(HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(mark).foregroundStyle(.secondary)
+                    Text(QuestionCard.inlineMarkdown(String(item.1)))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 10))
+                .padding(.leading, indent))
+            }
+            return AnyView(Text(QuestionCard.inlineMarkdown(line))
+                .font(.system(size: 10))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, indent))
+        }
     }
 }
 
@@ -535,6 +678,41 @@ private struct StatusBadge: View {
         case .done: Urgency.done.color
         case .running: .blue
         case .idle: .gray
+        }
+    }
+}
+
+private struct PrBadgeView: View {
+    let badge: PrBadge
+
+    var body: some View {
+        Text("\(symbol) \(badge.label)")
+            .font(.system(size: 9, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.15)))
+            .accessibilityLabel("Pull request: \(badge.label)")
+    }
+
+    private var symbol: String {
+        switch badge.kind {
+        case .ciFailing: "✕"
+        case .changesRequested: "●"
+        case .ciRunning: "◌"
+        case .ready: "✓"
+        case .merged: "⇡"
+        }
+    }
+
+    private var color: Color {
+        switch badge.kind {
+        case .ciFailing: .red
+        case .changesRequested: .orange
+        case .ciRunning: .gray
+        case .ready: .green
+        case .merged: .purple
         }
     }
 }

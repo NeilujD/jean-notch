@@ -34,18 +34,49 @@ public final class SessionStore {
     public private(set) var answering: Set<String> = []
     /// Why Jean refused the last answer to an open question, by question id.
     public private(set) var answerErrors: [String: String] = [:]
+    /// Experimental. While true, the store keeps the live Claude permission requests to answer them.
+    public var answersPermissions = false {
+        didSet {
+            if !answersPermissions { permissions = [:] }
+        }
+    }
+    /// Live Claude permission requests by session id, oldest first. Empty while `answersPermissions` is false.
+    public private(set) var permissions: [String: [PermissionRequest]] = [:]
+    /// Rpc ids of the permission requests whose answer is on its way to Jean.
+    public private(set) var answeringPermissions: Set<UInt64> = []
+    /// Why Jean refused the answer to a permission request, by rpc id. The request goes away soon after.
+    public private(set) var permissionErrors: [UInt64: String] = [:]
+    /// Experimental. Ids of the sessions whose stop request is on its way to Jean.
+    public private(set) var stopping: Set<String> = []
+    /// Why the last stop of a running session failed, by session id.
+    public private(set) var stopErrors: [String: String] = [:]
+    /// Experimental. While true, the store reads the plan of each session that waits on one.
+    public var approvesPlans = false {
+        didSet {
+            if approvesPlans { syncPlans() } else { dropPlans() }
+        }
+    }
+    /// The plan each session waits on, by session id. Empty while `approvesPlans` is false.
+    public private(set) var plans: [String: PendingPlan] = [:]
+    /// Ids of the sessions whose plan approval is on its way to Jean.
+    public private(set) var approving: Set<String> = []
+    /// Why Jean refused the last approval, by session id.
+    public private(set) var approveErrors: [String: String] = [:]
     /// Called when a session moves into waiting, done, or failed.
     @ObservationIgnored public var onAlert: ((SessionState) -> Void)?
 
     @ObservationIgnored private let client: JeanClient
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var unreadTask: Task<Void, Never>?
     @ObservationIgnored private var tokenTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var usageTask: Task<Void, Never>?
     @ObservationIgnored private var devServerTask: Task<Void, Never>?
     @ObservationIgnored private var devServerRecheckTask: Task<Void, Never>?
     /// One entry per session whose question was requested, so each is requested once.
     @ObservationIgnored private var questionTasks: [String: Task<Void, Never>] = [:]
+    /// One entry per session whose plan was requested, so each is requested once.
+    @ObservationIgnored private var planTasks: [String: Task<Void, Never>] = [:]
 
     public init(client: JeanClient = JeanClient()) {
         self.client = client
@@ -67,6 +98,7 @@ public final class SessionStore {
             connection = .online
             // Events were missed while offline: read every open question again after the snapshot.
             forgetQuestionRequests()
+            forgetPlanRequests()
             scheduleRefresh(after: .zero)
             scheduleUsageRefresh(after: .zero)
             scheduleDevServerRefresh(after: .zero)
@@ -88,8 +120,12 @@ public final class SessionStore {
             }
             switch jeanEvent {
             case .done(let ref, _), .failed(let ref), .cancelled(let ref):
+                stopErrors[ref.sessionId] = nil
                 loadTokens(ref.sessionId)
                 scheduleUsageRefresh(after: .seconds(2))
+                scheduleUnreadRefresh()
+            case .unreadChanged:
+                scheduleUnreadRefresh()
             case .sending(let ref) where tokens[ref.sessionId] == nil:
                 loadTokens(ref.sessionId)
             case .terminalStarted:
@@ -106,11 +142,14 @@ public final class SessionStore {
             default:
                 break
             }
+            trackPermissions(jeanEvent)
             // The run that just ended can end with a question, so read its last message (again).
             if case .done(let ref, _) = jeanEvent {
                 questionTasks.removeValue(forKey: ref.sessionId)?.cancel()
+                planTasks.removeValue(forKey: ref.sessionId)?.cancel()
             }
             syncQuestions()
+            syncPlans()
         }
     }
 
@@ -134,10 +173,54 @@ public final class SessionStore {
                     }
                 }
                 self.syncQuestions()
+                self.scheduleUnreadRefresh(after: .zero)
+                await self.loadPrCache()
+                self.syncPlans()
                 let total = snapshot.entries.reduce(0) { $0 + $1.sessions.count }
                 storeLog.info("Snapshot: \(snapshot.entries.count) worktrees, \(total) sessions, \(self.board.visibleGroups.count) visible groups, \(self.board.runningCount) running")
             } catch {
                 storeLog.error("Snapshot failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Reads the PR state Jean saved on the worktrees of every project with sessions: a worktree
+    /// can become visible later (unread list, new run) without a new snapshot.
+    /// Jean checks PRs only while its window is focused, so this is the state at its last check.
+    private func loadPrCache() async {
+        let projectIds = Set(board.sessions.values.map(\.projectId)).subtracting([""])
+        var cache: [String: PrStatus] = [:]
+        for projectId in projectIds {
+            do {
+                let raw = try await client.invoke("list_worktrees", args: ["projectId": projectId])
+                for worktree in try ServerMessage.decodeData([CachedWorktreePr].self, from: raw) {
+                    cache[worktree.id] = worktree.status
+                }
+            } catch {
+                storeLog.error("list_worktrees failed: \(String(describing: error), privacy: .public)")
+                return
+            }
+        }
+        guard !Task.isCancelled else { return }
+        board.loadPrCache(cache)
+    }
+
+    /// Debounced like the snapshot. Jean has no unread event: it is read again after events
+    /// that can change it (`chat:done`, `cache:invalidate`) and after each snapshot.
+    private func scheduleUnreadRefresh(after delay: Duration = .milliseconds(300)) {
+        unreadTask?.cancel()
+        unreadTask = Task { [weak self, client] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            let requestedAt = Date()
+            do {
+                let ids = try UnreadSessions.ids(from: await client.invoke(UnreadSessions.listCommand))
+                guard !Task.isCancelled, let self else { return }
+                self.board.loadUnread(ids, requestedAt: requestedAt)
+                self.syncQuestions()
+                storeLog.info("Unread: \(ids.count) sessions, \(self.board.visibleGroups.count) visible groups")
+            } catch {
+                storeLog.error("\(UnreadSessions.listCommand, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             }
         }
     }
@@ -205,11 +288,11 @@ public final class SessionStore {
     // MARK: Questions (experimental)
 
     /// Reads the last message of each session that can ask a question: one that waits on a
-    /// question, or one that finished (it can ask in its text). Drops the questions of the rest.
+    /// question, or an unread one that finished (it can ask in its text). Drops the questions of the rest.
     private func syncQuestions() {
         guard answersQuestions else { return }
         let candidates = board.sessions.values.filter {
-            ($0.status == .waiting(.question) || $0.status == .done) && !$0.worktreePath.isEmpty
+            ($0.status == .waiting(.question) || ($0.status == .done && $0.unread)) && !$0.worktreePath.isEmpty
         }
         let ids = Set(candidates.map(\.id))
         for id in questions.keys where !ids.contains(id) { questions[id] = nil }
@@ -326,6 +409,9 @@ public final class SessionStore {
         let chromeEnabled: Bool
         /// The raw `get_session` response, for the saved answers.
         let sessionResponse: Data
+        let backend: String
+        /// The raw `load_preferences` response, for the build settings.
+        let preferencesResponse: Data
     }
 
     /// Read at each send, because the user can change these settings in Jean while the card is open.
@@ -341,7 +427,8 @@ public final class SessionStore {
         let sessionResponse = try await sessionRaw
         let mcp = try ServerMessage.decodeData(SessionMcp.self, from: sessionResponse)
         let projects = try ServerMessage.decodeData([ProjectMcp].self, from: await projectsRaw)
-        let preferences = try ServerMessage.decodeData(PreferencesMcp.self, from: await preferencesRaw)
+        let preferencesResponse = try await preferencesRaw
+        let preferences = try ServerMessage.decodeData(PreferencesMcp.self, from: preferencesResponse)
         let project = projects.first { $0.id == session.projectId }
         let backend = mcp.backend ?? preferences.defaultBackend ?? "claude"
         let selection = McpSelection(
@@ -358,15 +445,211 @@ public final class SessionStore {
         let count = (config.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: [String: Any]])?["mcpServers"]?.count ?? 0
         let chrome = preferences.chromeEnabled ?? false
         storeLog.info("Send context for \(session.id, privacy: .public): \(count) MCP servers (\(backend, privacy: .public)), chrome \(chrome)")
-        return SendContext(mcpConfig: config, chromeEnabled: chrome, sessionResponse: sessionResponse)
+        return SendContext(
+            mcpConfig: config, chromeEnabled: chrome, sessionResponse: sessionResponse,
+            backend: backend, preferencesResponse: preferencesResponse
+        )
     }
 
-    public func markSeen(_ sessionId: String) { board.markSeen(sessionId) }
-    public func markAllSeen() { board.markAllSeen() }
+    // MARK: Plans (experimental)
 
-    /// Asks Jean to make `session` its active session. Best effort: Jean stores the
-    /// choice but its window may not switch to it yet.
+    /// Reads the plan of each session that waits on one. Drops the plans of the rest:
+    /// a plan approved in Jean's window, or a new run, ends the wait.
+    private func syncPlans() {
+        guard approvesPlans else { return }
+        let ids = Set(board.sessions.values.filter { $0.status == .waiting(.plan) && !$0.worktreePath.isEmpty }.map(\.id))
+        for id in plans.keys where !ids.contains(id) { plans[id] = nil }
+        for id in approving where !ids.contains(id) { approving.remove(id) }
+        for id in approveErrors.keys where !ids.contains(id) { approveErrors[id] = nil }
+        for (id, task) in planTasks where !ids.contains(id) {
+            task.cancel()
+            planTasks[id] = nil
+        }
+        for id in ids where planTasks[id] == nil {
+            if let session = board.sessions[id] { loadPlan(session) }
+        }
+    }
+
+    private func forgetPlanRequests() {
+        for task in planTasks.values { task.cancel() }
+        planTasks = [:]
+    }
+
+    private func dropPlans() {
+        forgetPlanRequests()
+        plans = [:]
+        approving = []
+        approveErrors = [:]
+    }
+
+    /// Reads the last run's message, then the plan file when there is one.
+    /// Reads a second time after 2 s when it finds no plan: Claude's `ExitPlanMode` puts the
+    /// session in wait before Jean saves the message.
+    private func loadPlan(_ session: SessionState) {
+        planTasks[session.id] = Task { [weak self, client] in
+            var pending: PendingPlan?
+            for attempt in 0..<2 where pending == nil {
+                if attempt > 0 { try? await Task.sleep(for: .seconds(2)) }
+                guard !Task.isCancelled else { return }
+                do {
+                    let raw = try await client.invoke("get_session", args: [
+                        "worktreeId": session.worktreeId,
+                        "worktreePath": session.worktreePath,
+                        "sessionId": session.id,
+                        "limit": 1,
+                    ])
+                    pending = try ServerMessage.decodeData(PlanDetail.self, from: raw).pendingPlan
+                } catch {
+                    storeLog.error("get_session failed: \(String(describing: error), privacy: .private)")
+                }
+            }
+            if let path = pending?.filePath {
+                do {
+                    let raw = try await client.invoke("read_plan_file", args: ["path": path, "sessionId": session.id])
+                    let text = try ServerMessage.decodeData(String.self, from: raw)
+                    if !text.isEmpty { pending?.text = text }
+                } catch {
+                    storeLog.error("read_plan_file failed: \(String(describing: error), privacy: .private)")
+                }
+            }
+            guard !Task.isCancelled, let self else { return }
+            if pending?.text.isEmpty == true { pending = nil }
+            if self.plans[session.id] != pending { self.plans[session.id] = pending }
+            storeLog.debug("Plan \(session.id, privacy: .public): \(pending == nil ? "none" : "open", privacy: .public)")
+        }
+    }
+
+    /// Approves the plan as Jean's own Approve button does, in build mode: Jean marks it
+    /// approved, and the session starts to implement it. The card closes on `chat:sending`.
+    /// Like Jean, goes on to the message when marking the plan fails.
+    public func approve(_ plan: PendingPlan, in session: SessionState) {
+        guard plans[session.id] == plan, !approving.contains(session.id) else { return }
+        approving.insert(session.id)
+        approveErrors[session.id] = nil
+        storeLog.info("Approving plan in \(session.id, privacy: .public)")
+        Task { [weak self, client] in
+            do {
+                let context = try await Self.sendContext(for: session, client: client)
+                let build = try ServerMessage.decodeData(BuildPreferences.self, from: context.preferencesResponse)
+                let requests = plan.approvalRequests(
+                    in: session, backend: context.backend, build: build,
+                    mcpConfig: context.mcpConfig, chromeEnabled: context.chromeEnabled
+                )
+                for request in requests {
+                    do {
+                        _ = try await client.invoke(request.command, args: request.args)
+                    } catch where request.command != "send_chat_message" {
+                        storeLog.error("\(request.command, privacy: .public) failed: \(String(describing: error), privacy: .private)")
+                    }
+                }
+            } catch {
+                storeLog.error("Plan approval failed: \(String(describing: error), privacy: .private)")
+                guard let self, self.approving.contains(session.id) else { return }
+                self.approving.remove(session.id)
+                self.approveErrors[session.id] = if case ClientError.notConnected = error {
+                    "Connection lost. Check the session in Jean."
+                } else {
+                    "Not sent: \(error)"
+                }
+            }
+        }
+    }
+
+    // MARK: Permission requests (experimental)
+
+    /// A new request opens a card. Any other event of the run means the requests were answered
+    /// (maybe in Jean's window, which sends no event for it) or the run ended.
+    private func trackPermissions(_ event: JeanEvent) {
+        switch event {
+        case .permissionRequest(let ref, let requests) where answersPermissions:
+            let rpcIds = Set(requests.map(\.rpcId))
+            permissions[ref.sessionId] = (permissions[ref.sessionId] ?? []).filter { !rpcIds.contains($0.rpcId) } + requests
+        case .sending(let ref), .done(let ref, _), .failed(let ref), .cancelled(let ref), .toolUse(let ref, _):
+            permissions[ref.sessionId] = nil
+        default:
+            break
+        }
+    }
+
+    /// Answers one live request. Jean has no "always allow" for it. On error (the run already
+    /// stopped, or Jean's window answered first) the card shows the error, then goes away.
+    public func answerPermission(_ request: PermissionRequest, in session: SessionState, approved: Bool) {
+        guard permissions[session.id]?.contains(request) == true,
+              !answeringPermissions.contains(request.rpcId)
+        else { return }
+        answeringPermissions.insert(request.rpcId)
+        storeLog.info("Answering permission \(request.rpcId) in \(session.id, privacy: .public): \(approved ? "allow" : "deny", privacy: .public)")
+        Task { [weak self, client] in
+            var failure: String?
+            do {
+                _ = try await client.invoke("respond_claude_permission", args: request.answerArgs(sessionId: session.id, approved: approved))
+            } catch {
+                storeLog.error("respond_claude_permission failed: \(String(describing: error), privacy: .public)")
+                failure = "Not answered: \(error)"
+            }
+            guard let self else { return }
+            self.answeringPermissions.remove(request.rpcId)
+            if let failure {
+                self.permissionErrors[request.rpcId] = failure
+                try? await Task.sleep(for: .seconds(4))
+                self.permissionErrors[request.rpcId] = nil
+            }
+            self.permissions[session.id]?.removeAll { $0 == request }
+            if self.permissions[session.id]?.isEmpty == true {
+                self.permissions[session.id] = nil
+                if failure == nil { self.board.markResumed(session.id) }
+            }
+        }
+    }
+
+    // MARK: Stop (experimental)
+
+    /// Asks Jean to cancel the session's run. Jean then sends `chat:cancelled`, which updates the row.
+    public func stop(_ session: SessionState) {
+        guard session.status == .running, !stopping.contains(session.id) else { return }
+        stopping.insert(session.id)
+        stopErrors[session.id] = nil
+        storeLog.info("Stopping \(session.id, privacy: .public)")
+        Task { [weak self, client] in
+            var failure: String?
+            do {
+                let raw = try await client.invoke("cancel_chat_message", args: session.cancelArgs)
+                // False: Jean found no run to cancel.
+                if try !ServerMessage.decodeData(Bool.self, from: raw) { failure = "Not stopped: Jean found no run." }
+            } catch {
+                storeLog.error("cancel_chat_message failed: \(String(describing: error), privacy: .public)")
+                failure = "Not stopped: \(error)"
+            }
+            guard let self else { return }
+            self.stopping.remove(session.id)
+            self.stopErrors[session.id] = failure
+        }
+    }
+
+    /// Marks every unread session read, in the notch now and in Jean. Reads Jean's list first:
+    /// it can hold sessions the board does not show.
+    public func markAllRead() {
+        let shown = board.unreadIds
+        board.markRead(shown)
+        syncQuestions()
+        Task { [weak self, client] in
+            do {
+                let ids = try shown.union(UnreadSessions.ids(from: await client.invoke(UnreadSessions.listCommand)))
+                _ = try await client.invoke(UnreadSessions.markReadCommand, args: UnreadSessions.markReadArgs(ids))
+                storeLog.info("Marked \(ids.count) sessions read")
+            } catch {
+                storeLog.error("\(UnreadSessions.markReadCommand, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+            self?.scheduleUnreadRefresh(after: .zero)
+        }
+    }
+
+    /// Asks Jean to make `session` its active session, which also marks it read. Best effort:
+    /// Jean stores the choice but its window may not switch to it yet.
     public func selectInJean(_ session: SessionState) async {
+        board.markRead([session.id])
+        syncQuestions()
+        defer { scheduleUnreadRefresh(after: .zero) }
         do {
             _ = try await client.invoke("set_active_session", args: [
                 "worktreeId": session.worktreeId,
@@ -376,5 +659,12 @@ public final class SessionStore {
         } catch {
             storeLog.error("set_active_session failed: \(String(describing: error), privacy: .public)")
         }
+    }
+}
+
+extension SessionState {
+    /// Arguments of Jean's `cancel_chat_message` command.
+    var cancelArgs: [String: any Sendable] {
+        ["sessionId": id, "worktreeId": worktreeId]
     }
 }

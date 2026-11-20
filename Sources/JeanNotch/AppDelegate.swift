@@ -67,13 +67,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.placePanel() }
         }
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            guard app?.bundleIdentifier == jeanBundleId else { return }
-            MainActor.assumeIsolated { self?.store.markAllSeen() }
-        }
     }
 
     private func placePanel() {
@@ -104,9 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Jump to Jean
 
-    /// Brings Jean to the front, then asks it to select the session (best effort).
+    /// Brings Jean to the front, then asks it to select the session (best effort), which marks it read.
     private func open(_ session: SessionState) {
-        store.markSeen(session.id)
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: jeanBundleId) {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
@@ -127,8 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mute.state = muted ? .on : .off
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        let unread = store.board.unreadIds.count
+        let markAllRead = NSMenuItem(title: "Mark All Read", action: unread > 0 ? #selector(markAllRead) : nil, keyEquivalent: "")
+        if unread > 0 { markAllRead.badge = NSMenuItemBadge(count: unread) }
         let quit = NSMenuItem(title: "Quit JeanNotch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        for item in [mute, login] { item.target = self }
+        for item in [mute, login, markAllRead] { item.target = self }
         let limits = [WarningLimit.tokens, .usage].map { limit in
             let item = NSMenuItem(title: limit.title, action: nil, keyEquivalent: "")
             item.submenu = warningMenu(limit)
@@ -136,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let experimental = NSMenuItem(title: "Experimental", action: nil, keyEquivalent: "")
         experimental.submenu = experimentalMenu()
-        menu.items = [mute, login] + limits + [experimental, .separator(), quit]
+        menu.items = [mute, login, .separator(), markAllRead, .separator()] + limits + [experimental, .separator(), quit]
 
         if let event, let view {
             NSMenu.popUpContextMenu(menu, with: event, for: view)
@@ -190,11 +185,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyExperimental() {
         store.answersQuestions = ExperimentalFeature.answerQuestions.isOn
+        store.answersPermissions = ExperimentalFeature.answerPermissions.isOn
+        store.approvesPlans = ExperimentalFeature.approvePlans.isOn
     }
 
     @objc private func setWarning(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
         UserDefaults.standard.set(sender.tag, forKey: key)
+    }
+
+    @objc private func markAllRead() {
+        store.markAllRead()
     }
 
     @objc private func toggleMute() {
