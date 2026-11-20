@@ -32,6 +32,7 @@ private let ref = SessionRef(sessionId: "s1", worktreeId: "w1")
     #expect(try parse(#"{"type":"event","event":"ws:resync","payload":{}}"#) == .event(.resync))
     #expect(try parse(#"{"type":"event","event":"session-renamed","payload":{"session_id":"s1"}}"#) == .event(.structureChanged))
     #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["sessions"]}}"#) == .event(.structureChanged))
+    #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["unread-sessions"]}}"#) == .event(.unreadChanged))
     #expect(try parse(#"{"type":"event","event":"cache:invalidate","payload":{"keys":["preferences"]}}"#) == .event(nil))
 }
 
@@ -119,4 +120,53 @@ private func usage(_ json: String) throws -> ProviderUsage {
     #expect(ProviderUsage.timeLeft(until: 1_000_000 + 4 * 3600 + 55 * 60, now: now) == "4h55")
     #expect(ProviderUsage.timeLeft(until: 1_000_000 + 5 * 86_400 + 100, now: now) == "5d")
     #expect(ProviderUsage.timeLeft(until: 999_000, now: now) == "0m")
+}
+
+@Test func parsesClaudePermissionRequestOnlyWithRpcId() throws {
+    let live = try parse(#"{"type":"event","event":"chat:permission_denied","payload":{"session_id":"s1","worktree_id":"w1","denials":[{"tool_name":"Bash","tool_use_id":"tu1","tool_input":{"command":"ls -la","description":"List"},"rpc_id":7}]}}"#)
+    #expect(live == .event(.permissionRequest(ref, [
+        PermissionRequest(rpcId: 7, toolName: "Bash", toolUseId: "tu1", input: "ls -la"),
+    ])))
+    let denied = try parse(#"{"type":"event","event":"chat:permission_denied","payload":{"session_id":"s1","worktree_id":"w1","denials":[{"tool_name":"Bash","tool_use_id":"tu1","tool_input":{"command":"ls"}}]}}"#)
+    #expect(denied == .event(.permissionDenied(ref)))
+}
+
+@Test func showsToolInputWithoutCommandAsSortedFields() throws {
+    let message = try parse(#"{"type":"event","event":"chat:permission_denied","payload":{"session_id":"s1","worktree_id":"w1","denials":[{"tool_name":"Edit","tool_use_id":"tu2","tool_input":{"file_path":"/a.txt","replace_all":false,"old_string":"x"},"rpc_id":8}]}}"#)
+    guard case .event(.permissionRequest(_, let requests)?) = message else {
+        Issue.record("not a permission request")
+        return
+    }
+    #expect(requests.first?.input == "file_path: /a.txt\nold_string: x\nreplace_all: false")
+}
+
+@Test func showsEveryFieldWhenACommandHasFieldsThatAct() {
+    let input = JSONValue.object(["command": .string("ls"), "description": .string("List"), "cwd": .string("/etc")])
+    #expect(input.displayText == "command: ls\ncwd: /etc\ndescription: List")
+    #expect(JSONValue.object(["command": .string("ls"), "timeout": .number(5000)]).displayText == "ls")
+}
+
+@Test func buildsPermissionAnswerArgs() {
+    let request = PermissionRequest(rpcId: 7, toolName: "Bash", toolUseId: "tu1", input: "ls")
+    let args = request.answerArgs(sessionId: "s1", approved: true)
+    #expect(Set(args.keys) == ["sessionId", "rpcId", "approved"])
+    #expect(args["sessionId"] as? String == "s1")
+    #expect(args["rpcId"] as? UInt64 == 7)
+    #expect(args["approved"] as? Bool == true)
+    #expect(request.answerArgs(sessionId: "s1", approved: false)["approved"] as? Bool == false)
+}
+
+@Test func parsesPrStatusUpdate() throws {
+    let message = try parse(#"{"type":"event","event":"pr:status-update","payload":{"worktree_id":"w1","pr_number":12,"pr_url":"https://github.com/o/r/pull/12","base_branch":"main","state":"open","is_draft":false,"review_decision":null,"check_status":"failure","display_status":"open","mergeable":"mergeable","checked_at":1795000000}}"#)
+    #expect(message == .event(.prStatus(PrStatus(worktreeId: "w1", number: 12, state: "open", reviewDecision: nil, checkStatus: "failure"))))
+    #expect(try parse(#"{"type":"event","event":"pr:status-update","payload":{"state":"open"}}"#) == .event(nil))
+}
+
+@Test func decodesCachedPrStateFromListWorktrees() throws {
+    let raw = Data(#"{"type":"response","id":"1","data":[{"id":"w1","name":"main","path":"/x","pr_number":5,"pr_url":"https://github.com/o/r/pull/5","cached_pr_status":"review","cached_check_status":"pending"},{"id":"w2","name":"b","path":"/y"}]}"#.utf8)
+    let worktrees = try ServerMessage.decodeData([CachedWorktreePr].self, from: raw)
+    #expect(worktrees == [
+        CachedWorktreePr(id: "w1", prNumber: 5, cachedPrStatus: "review", cachedCheckStatus: "pending"),
+        CachedWorktreePr(id: "w2", prNumber: nil, cachedPrStatus: nil, cachedCheckStatus: nil),
+    ])
 }

@@ -19,9 +19,18 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
 
 - **Collapsed:** a black shape that blends with the notch. Left: the J and the number of
   running sessions. Right: a dot for the most urgent state (orange = waiting for you,
-  red = failed, green = done and not seen yet). A gray bolt means Jean is offline.
+  red = failed, green = done and unread). A gray bolt means Jean is offline.
 - **Expanded** (on hover, and for ~4 s after an alert): sessions grouped by
-  project › worktree, sorted waiting → failed → running → done. Idle and seen sessions are hidden.
+  project › worktree, sorted waiting → failed → running → done. The notch shows the same
+  unread sessions as Jean: a waiting, failed, or done session stays until you open it in Jean
+  or click its row. Running sessions always show; idle and read sessions are hidden.
+- **PR badge:** a worktree with a pull request shows one badge after its name:
+  ✕ CI failing (red), ● Changes requested (orange), ◌ CI running (gray), ✓ Ready (green),
+  or ⇡ Merged (purple), with the PR number. A closed PR or no PR shows no badge. The badge
+  shows the last PR state Jean knows. Jean checks PRs only while its window is in front:
+  every 5 minutes, and faster for the open worktree. "Changes requested" shows only after
+  such a check while JeanNotch runs (Jean does not save the review state). A badge change
+  plays no sound and does not expand the notch.
 - **Tokens:** each row shows the session's total tokens, for example "3.2M"
   (k = thousand, M = million). The total counts input, output, and cache reads and
   writes, summed over all runs. Jean saves a run's usage when the run ends, so the count
@@ -29,9 +38,11 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   default limit is 10 million. Change it in the menu (**Token Warning**), or set any value with
   `defaults write build.jean.notch tokenWarning -int 3000000` (0 turns it off).
 - **Alert:** when a session starts waiting, finishes, or fails, the notch expands and plays a
-  soft system sound (mute it in the menu). A finished session stays "unseen" until you click
-  its row or bring Jean to the front.
-- **Click a row:** brings Jean to the front and asks it to select that session.
+  soft system sound (mute it in the menu). Bringing Jean to the front does not mark sessions read.
+- **Click a row:** brings Jean to the front and asks it to select that session. This marks the
+  session read, in Jean and in the notch.
+- **Mark All Read** (menu, with the unread count): marks every unread session read, in the
+  notch and in Jean. Jean's unread count goes to 0.
 - **Plan usage:** the bottom of the expanded panel shows how much of each plan limit you
   used, for Claude, Codex and Grok, and the time until it resets
   (for example "Claude  5h 1% · 4h55  week 29% · 5d"). A provider you are not logged in to
@@ -39,8 +50,8 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   limit is over 80%, the collapsed notch shows an orange ⚠. Change the limit in the menu
   (**Usage Warning**) or with `defaults write build.jean.notch usageWarning -int 90`
   (0 turns it off). Jean's other agents (OpenCode, Cursor, Pi, and so on) give no usage data.
-- **Gear or right-click:** Mute Sounds, Launch at Login, Token Warning, Usage Warning,
-  Experimental, Quit.
+- **Gear or right-click:** Mute Sounds, Launch at Login, Mark All Read, Token Warning,
+  Usage Warning, Experimental, Quit.
 
 ### Experimental features
 
@@ -48,7 +59,7 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
 > any release. Turn one on in the menu (**Experimental**).
 
 <p align="center">
-  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked item 'Answer Questions in the Notch'">
+  <img src="assets/experimental-menu.png" width="420" alt="Gear menu with the Experimental submenu open: the notice 'Experimental: can change or break' and the checked items 'Answer Questions in the Notch' and 'Answer Permissions in the Notch'">
 </p>
 
 - **Answer Questions in the Notch.** When a session ends its turn with a question, the
@@ -93,13 +104,44 @@ Jean's built-in WebSocket server, unless you turn on an [experimental feature](#
   - JeanNotch finds a question asked as text when a run ends. It does not find one that was
     asked before JeanNotch started. The alert for such a run is still the "done" sound and
     confetti.
-  - Permission requests and Codex or OpenCode question tools have no card yet.
+  - Codex or OpenCode question tools have no card yet.
   - While this is on, JeanNotch reads the last run of each session that ends a run
     (`get_session`). When you click **Send**, it also reads the project and preference
     lists and the MCP servers (`list_projects`, `load_preferences`, `get_mcp_servers`), and
     for an `AskUserQuestion` card it saves the answer (`update_session_state`).
     While it is off, JeanNotch sends no message to a session.
   - `defaults write build.jean.notch experimental.answerQuestions -bool true` also turns it on
+    (restart JeanNotch after).
+
+- **Stop Sessions from the Notch.** Put the pointer on a running session row: a ■ button
+  shows in place of the token count and time. Click it once: it changes to a red **Stop?**.
+  Click **Stop?** to stop the run.
+  - One click never stops a run, because the notch can open under your pointer. Move the
+    pointer off the row and **Stop?** changes back to ■.
+  - JeanNotch asks Jean to cancel the run (`cancel_chat_message`). The row then shows the
+    state that Jean sends: a stopped run is idle, so the row leaves the list.
+  - If Jean cannot stop the run, a short red error shows below the row, and the row stays.
+  - While this is off, JeanNotch shows no stop button and stops nothing.
+  - `defaults write build.jean.notch experimental.stopSessions -bool true` also turns it on.
+
+- **Answer Permissions in the Notch.** When a Claude session in Supervised mode asks to use a
+  tool, the session row shows "Approval" and a card shows below it: the tool name and its input
+  (the command for `Bash`; 3 lines, then it scrolls). Click **Deny** to deny at once. Click
+  **Allow**, then **Allow?**, to allow. The session then continues.
+
+  - Only Claude in Supervised mode asks during a run. A tool that Claude denies by itself
+    shows in Jean at the end of the run: that gets no card. Codex and OpenCode permission
+    requests have no card yet.
+  - There is no "always allow". To allow a tool for the next runs, open Jean.
+  - The card goes away when you answer, when the run continues or ends, or when you answer
+    in Jean's window. Jean sends no event for an answer in its window, so the card can stay
+    until the run's next tool or the end of the run. If you then click, Jean refuses the
+    answer: the card shows the error for a few seconds and goes away.
+  - JeanNotch sees only the requests that come while it runs. After a restart of JeanNotch,
+    answer an open request in Jean.
+  - While this is on, JeanNotch answers with `respond_claude_permission`. While it is off,
+    JeanNotch sends no answer.
+  - `defaults write build.jean.notch experimental.answerPermissions -bool true` also turns it on
     (restart JeanNotch after).
 
 - **Approve Plans in the Notch.** When a session waits for you to approve its plan, the row
