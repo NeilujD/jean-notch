@@ -30,7 +30,11 @@ public enum JeanEvent: Equatable, Sendable {
     /// Codex/OpenCode/Devin ask mid-run; the run resumes once answered.
     case approvalRequest(SessionRef, WaitKind)
     case toolUse(SessionRef, name: String)
+    /// Jean's desktop app polls each worktree's PR every 5 minutes and broadcasts the result.
+    case prStatus(PrStatus)
     case structureChanged
+    /// Jean's unread sessions may have changed (a session was opened or marked read).
+    case unreadChanged
     case resync
 
     static func make(name: String, payload: EventPayload?) -> JeanEvent? {
@@ -40,7 +44,10 @@ public enum JeanEvent: Equatable, Sendable {
             return .structureChanged
         case "cache:invalidate":
             let keys = Set(payload?.keys ?? [])
-            return keys.isDisjoint(with: ["sessions", "projects"]) ? nil : .structureChanged
+            if !keys.isDisjoint(with: ["sessions", "projects"]) { return .structureChanged }
+            return keys.contains("unread-sessions") ? .unreadChanged : nil
+        case "pr:status-update":
+            return payload?.prStatus.map(JeanEvent.prStatus)
         default: break
         }
         guard let ref = payload?.ref else { return nil }
@@ -74,15 +81,28 @@ struct EventPayload: Decodable {
     let name: String?
     let keys: [String]?
     let denials: [Denial]?
+    let prNumber: Int?
+    let state: String?
+    let reviewDecision: String?
+    let checkStatus: String?
 
     var ref: SessionRef? {
         guard let sessionId, let worktreeId else { return nil }
         return SessionRef(sessionId: sessionId, worktreeId: worktreeId)
     }
 
+    var prStatus: PrStatus? {
+        guard let worktreeId, let state else { return nil }
+        return PrStatus(
+            worktreeId: worktreeId, number: prNumber, state: state,
+            reviewDecision: reviewDecision, checkStatus: checkStatus
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id", worktreeId = "worktree_id"
         case waitingForPlan = "waiting_for_plan", name, keys, denials
+        case prNumber = "pr_number", state, reviewDecision = "review_decision", checkStatus = "check_status"
     }
 
     /// `PermissionDenial` in Jean's chat/types.rs. Only a live request has an `rpc_id`.
@@ -122,6 +142,10 @@ struct EventPayload: Decodable {
         waitingForPlan = try? c.decodeIfPresent(Bool.self, forKey: .waitingForPlan)
         name = try? c.decodeIfPresent(String.self, forKey: .name)
         keys = try? c.decodeIfPresent([String].self, forKey: .keys)
+        prNumber = try? c.decodeIfPresent(Int.self, forKey: .prNumber)
+        state = try? c.decodeIfPresent(String.self, forKey: .state)
+        reviewDecision = try? c.decodeIfPresent(String.self, forKey: .reviewDecision)
+        checkStatus = try? c.decodeIfPresent(String.self, forKey: .checkStatus)
         denials = try? c.decodeIfPresent([Denial].self, forKey: .denials)
     }
 }
@@ -278,6 +302,24 @@ public struct AllSessionsResponse: Decodable, Equatable, Sendable {
     /// Matches any JSON value; used only to count array elements.
     struct Opaque: Decodable {
         init(from decoder: Decoder) throws {}
+    }
+}
+
+// MARK: - Unread sessions
+
+/// Jean's unread sessions: `list_unread_sessions` answers in the `list_all_sessions` shape.
+public enum UnreadSessions {
+    public static let listCommand = "list_unread_sessions"
+    public static let markReadCommand = "set_sessions_last_opened_bulk"
+
+    public static func ids(from raw: Data) throws -> Set<String> {
+        let response = try ServerMessage.decodeData(AllSessionsResponse.self, from: raw)
+        return Set(response.entries.flatMap { $0.sessions.map(\.id) })
+    }
+
+    /// Jean stamps each session as opened now, so it leaves Jean's unread list.
+    public static func markReadArgs(_ ids: Set<String>) -> [String: any Sendable] {
+        ["sessionIds": ids.sorted()]
     }
 }
 
